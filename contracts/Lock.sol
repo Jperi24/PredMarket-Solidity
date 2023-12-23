@@ -243,13 +243,15 @@ contract predMarket {
     }
 
     function withdrawA()public{
-        require( s_raffleState== RaffleState.PAYOUT);
+        // require( s_raffleState== RaffleState.PAYOUT);
         uint i = 0;
         while(i<arrayOfBettersA.length){
             if(arrayOfBettersA[i].bettor==msg.sender){
-                (bool success, ) = arrayOfBettersA[i].bettor.call{value: arrayOfBettersA[i].amount}("");
-                require(success, "Transfer failed");
-                break;
+                if(arrayOfBettersA[i].amount > 0){
+                    (bool success, ) = arrayOfBettersA[i].bettor.call{value: arrayOfBettersA[i].amount}("");
+                    require(success, "Transfer failed");
+                    break;
+                }
             }
             else{
                 i++;
@@ -263,9 +265,11 @@ contract predMarket {
         uint i = 0;
         while(i<arrayOfBettersB.length){
             if(arrayOfBettersB[i].bettor==msg.sender){
-                (bool success, ) = arrayOfBettersB[i].bettor.call{value: arrayOfBettersB[i].amount}("");
-                require(success, "Transfer failed");
-                break;
+                if(arrayOfBettersB[i].amount >0){
+                    (bool success, ) = arrayOfBettersB[i].bettor.call{value: arrayOfBettersB[i].amount}("");
+                    require(success, "Transfer failed");
+                    break;
+                }
             }
             else{
                 i++;
@@ -332,6 +336,14 @@ contract predMarket {
         } else {
             // Return the information found
             return (betterFromA, betterFromB);
+        }
+    }
+
+    function isOwner() public view returns(bool){
+        if(msg.sender == owner){
+            return true;
+        }else{
+            return false;
         }
     }
 
