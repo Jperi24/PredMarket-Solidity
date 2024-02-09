@@ -50,8 +50,7 @@ contract predMarket {
         OPEN,
         VOTING,
         UNDERREVIEW,
-        PAYOUT,
-        CLOSED
+        PAYOUT
     }
 
     function viewPots()public view returns(uint256,uint256){
@@ -64,6 +63,9 @@ contract predMarket {
         //Responsible for paying the winner and dedudcting from the losers in the correct order
         uint i = 0;
         while(i<arrWinner.length){
+            if(arrWinner[i].bettor == payable(address(0))){
+                i++;
+            }
             uint x = 0;
             uint winnerNeeds = (arrWinner[i].amount * arrWinner[i].odds[0])/arrWinner[i].odds[1] ;
             while (x < arrLost.length) {
@@ -89,7 +91,7 @@ contract predMarket {
    }
 
 
-    function winLossBetA(uint256 potentialBet) public view returns(uint256,uint256, uint256) {
+    function winLossBetA(uint256 potentialBet,bool addition) public view returns(uint256,uint256, uint256,uint256) {
         bool bettorExists = false;
         uint256 potB = BetB; // Assuming BetB is declared somewhere in your contract
         uint betterPosition;
@@ -106,42 +108,65 @@ contract predMarket {
 
         // Create arrWinner
         if (!bettorExists) {
-            arrWinner = new better[](arrayOfBettersA.length + 1);
-            for (uint i = 0; i < arrayOfBettersA.length; i++) {
-                arrWinner[i] = arrayOfBettersA[i];
+            if(addition){
+                arrWinner = new better[](arrayOfBettersA.length + 1);
+                for (uint i = 0; i < arrayOfBettersA.length; i++) {
+                    arrWinner[i] = arrayOfBettersA[i];
+                }
+                arrWinner[arrayOfBettersA.length] = better(payable(msg.sender), potentialBet, oddsBetA);
+                betterPosition = arrayOfBettersA.length;
+            }else{
+                return(0,0,0,0);
             }
-            arrWinner[arrayOfBettersA.length] = better(payable(msg.sender), potentialBet, oddsBetA);
-            betterPosition = arrayOfBettersA.length;
         } else {
-            arrWinner = arrayOfBettersA;
-            arrWinner[betterPosition].amount += potentialBet;
+
+            if(addition){
+                arrWinner = arrayOfBettersA;
+                arrWinner[betterPosition].amount += potentialBet;
             // Note: This does not actually modify the array; it's for calculation purposes
+            }else{
+                if(arrayOfBettersA[betterPosition].amount >= potentialBet){
+                    arrWinner = arrayOfBettersA;
+                    arrWinner[betterPosition].amount -= potentialBet;
+                }else{
+                    return (0,0,0,0);
+                }
+                
+            }
         }
+           
+                
+        
 
         // Calculate winnings and risks
         uint256 payout;
         uint256 risk;
         uint256 payout2;
         for (uint i = 0; i < arrWinner.length; i++) {
+            if(arrWinner[i].bettor == payable(address(0))){
+                i++;
+            }
             payout = (arrWinner[i].amount * oddsBetA[0]) / oddsBetA[1];
             payout2 = payout;
             if (i == betterPosition) {
                 if (potB < payout) {
-                    return (payout2, potB, (potB * oddsBetA[1]) / oddsBetA[0]);
+                    return (payout2, potB, (potB * oddsBetA[1]) / oddsBetA[0],arrWinner[i].amount);
                 } else {
                     risk = (payout * oddsBetA[1]) / oddsBetA[0];
-                    return (payout2, payout, arrWinner[i].amount);
+                    return (payout2, payout, arrWinner[i].amount,arrWinner[i].amount);
                 }
             } else {
                 if (potB >= payout) {
                     potB -= payout;
+                }else{
+                    potB = 0;
                 }
             }
         }
-        return (payout2,0, 0); // Return default values if no condition is met
+        return (payout2,0, 0,arrWinner[betterPosition].amount); // Return default values if no condition is met
     }
 
-    function winLossBetB(uint256 potentialBet) public view returns(uint256, uint256, uint256) {
+    function winLossBetB(uint256 potentialBet,bool addition) public view returns(uint256, uint256, uint256, uint256) {
         bool bettorExists = false;
         uint256 potA = BetA; // Assuming BetA is declared somewhere in your contract
         uint betterPosition;
@@ -158,16 +183,30 @@ contract predMarket {
 
         // Create arrWinner
         if (!bettorExists) {
-            arrWinner = new better[](arrayOfBettersB.length + 1);
-            for (uint i = 0; i < arrayOfBettersB.length; i++) {
-                arrWinner[i] = arrayOfBettersB[i];
+            if(addition){
+                arrWinner = new better[](arrayOfBettersB.length + 1);
+                for (uint i = 0; i < arrayOfBettersB.length; i++) {
+                    arrWinner[i] = arrayOfBettersB[i];
+                }
+                arrWinner[arrayOfBettersB.length] = better(payable(msg.sender), potentialBet, oddsBetB);
+                betterPosition = arrayOfBettersB.length;
+            }else{
+                return (0,0,0,0);
             }
-            arrWinner[arrayOfBettersB.length] = better(payable(msg.sender), potentialBet, oddsBetB);
-            betterPosition = arrayOfBettersB.length;
         } else {
-            arrWinner = arrayOfBettersB;
-            arrWinner[betterPosition].amount += potentialBet;
+            if(addition){
+                arrWinner = arrayOfBettersB;
+                arrWinner[betterPosition].amount += potentialBet;
             // Note: This does not actually modify the array; it's for calculation purposes
+            }else{
+                if(arrayOfBettersB[betterPosition].amount >= potentialBet){
+                    arrWinner = arrayOfBettersB;
+                    arrWinner[betterPosition].amount -= potentialBet;
+                }else{
+                    return (0,0,0,0);
+                }
+                
+            }
         }
 
         // Calculate winnings and risks
@@ -175,22 +214,27 @@ contract predMarket {
         uint256 risk;
         uint256 payout2;
         for (uint i = 0; i < arrWinner.length; i++) {
+            if(arrWinner[i].bettor == payable(address(0))){
+                i++;
+            }
             payout = (arrWinner[i].amount * oddsBetB[0]) / oddsBetB[1];
             payout2 = payout;
             if (i == betterPosition) {
                 if (potA < payout) {
-                    return (payout2, potA, (potA * oddsBetB[1]) / oddsBetB[0]);
+                    return (payout2, potA, (potA * oddsBetB[1]) / oddsBetB[0],arrWinner[betterPosition].amount);
                 } else {
                     risk = (payout * oddsBetB[1]) / oddsBetB[0];
-                    return (payout2 ,payout, arrWinner[i].amount);
+                    return (payout2 ,payout, arrWinner[i].amount,arrWinner[betterPosition].amount);
                 }
             } else {
                 if (potA >= payout) {
                     potA -= payout;
+                }else{
+                    potA = 0;
                 }
             }
         }
-        return (payout2, 0, 0); // Return default values if no condition is met
+        return (payout2, 0, 0,arrWinner[betterPosition].amount); // Return default values if no condition is met
     }
 
 
@@ -506,13 +550,18 @@ contract predMarket {
     }
 
     function withdrawA()public{
-        // require( s_raffleState== RaffleState.PAYOUT);
+        require(s_raffleState == RaffleState.OPEN || s_raffleState == RaffleState.PAYOUT);
+
         uint i = 0;
         while(i<arrayOfBettersA.length){
             if(arrayOfBettersA[i].bettor==msg.sender){
                 if(arrayOfBettersA[i].amount > 0){
+                    if(s_raffleState == RaffleState.OPEN){
+                        BetA -=arrayOfBettersA[i].amount;
+                    }
                     (bool success, ) = arrayOfBettersA[i].bettor.call{value: arrayOfBettersA[i].amount}("");
                     require(success, "Transfer failed");
+                    arrayOfBettersA[i].bettor = payable(address(0));
                     break;
                 }
             }
@@ -524,13 +573,18 @@ contract predMarket {
     }
 
     function withdrawB()public{
-        require(s_raffleState== RaffleState.PAYOUT);
+        require(s_raffleState == RaffleState.OPEN || s_raffleState == RaffleState.PAYOUT);
+
         uint i = 0;
         while(i<arrayOfBettersB.length){
             if(arrayOfBettersB[i].bettor==msg.sender){
                 if(arrayOfBettersB[i].amount >0){
+                    if(s_raffleState == RaffleState.OPEN){
+                        BetB -=arrayOfBettersB[i].amount;
+                    }
                     (bool success, ) = arrayOfBettersB[i].bettor.call{value: arrayOfBettersB[i].amount}("");
                     require(success, "Transfer failed");
+                    arrayOfBettersB[i].bettor = payable(address(0));
                     break;
                 }
             }
