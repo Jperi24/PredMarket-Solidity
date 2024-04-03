@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT
 // 1. Pragma
-pragma solidity ^0.8.7;
+pragma solidity ^0.8.20;
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract predMarket {
+
+contract predMarket is ReentrancyGuard {
 
     address private immutable owner;
+    address private immutable staffWallet = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+    uint256 public locked = 0;
+
     uint256 public BetA =0;
     uint256 public BetB = 0;
     RaffleState private s_raffleState;
@@ -13,9 +18,22 @@ contract predMarket {
     uint256 public voteTime;
     uint8 public winner;
     uint8 public disagree;
+    uint256 buyIn;
+    mapping(address=>bool) public boughtIn;
     uint256[2] public oddsBetA;
     uint256[2] public oddsBetB;
     error didNotBet(string betAorB);
+    address public disagreeUser;
+
+    event userBoughtIn(address indexed sender);
+    event contractDeployed(uint256 timeStamp);
+    event winnerDeclaredVoting(uint8 winnerIs, uint256 votingTime);
+    event winnerFinalized(uint8 winnerIs);
+    event userPlacedBet(address indexed sender, uint256 betPlacedValue);
+    event userReducedBet(address indexed sender, uint256 betReduced);
+    event userWithdrewBet(address indexed sender,string betAorB);
+    event underReview();
+    
 
      
 
@@ -27,7 +45,9 @@ contract predMarket {
     better[] public arrayOfBettersA;
     better[] public arrayOfBettersB;
 
-    constructor(uint256 timeToEnd, uint256 _odds1, uint256 _odds2) {
+    constructor(uint256 timeToEnd, uint256 _odds1, uint256 _odds2,uint256 _buyIn) payable {
+        require(msg.value == 50000000000000000, "Deployment requires exactly 0.05 Ether");
+        locked += msg.value;
         s_raffleState = RaffleState.OPEN;
         startTime = block.timestamp;
         endTime = startTime +timeToEnd;
@@ -36,6 +56,8 @@ contract predMarket {
         oddsBetA[1] = _odds2;
         oddsBetB[0] = _odds2;
         oddsBetB[1] = _odds1;
+        buyIn = _buyIn;
+        emit contractDeployed(startTime);
 
 
     }
@@ -44,18 +66,30 @@ contract predMarket {
         require(msg.sender == owner, "Only the owner can call this function.");
         _;
     }
+    modifier onlyStaff(){
+        require(msg.sender == staffWallet);
+        _;
+    }
+
+    modifier ownerOrStaff(){
+        require(msg.sender ==owner || msg.sender == staffWallet);
+        _;
+    }
+
 
 
      enum RaffleState {
         OPEN,
         VOTING,
         UNDERREVIEW,
+        SETTLED,
         PAYOUT
     }
 
     function viewPots()public view returns(uint256,uint256){
         return (BetA,BetB);
     }
+
 
 
 
@@ -91,9 +125,10 @@ contract predMarket {
    }
 
 
-    function winLossBetA(uint256 potentialBet,bool addition) public view returns(uint256,uint256, uint256,uint256) {
+    function winLossBetA(uint256 potentialBet,bool addition) public view returns(uint256,uint256, uint256,uint256,uint256,uint256) {
         bool bettorExists = false;
         uint256 potB = BetB; // Assuming BetB is declared somewhere in your contract
+        uint256 potBStatic = BetB;
         uint betterPosition;
         better[] memory arrWinner;
 
@@ -116,7 +151,7 @@ contract predMarket {
                 arrWinner[arrayOfBettersA.length] = better(payable(msg.sender), potentialBet, oddsBetA);
                 betterPosition = arrayOfBettersA.length;
             }else{
-                return(0,0,0,0);
+                return(0,0,0,0,potBStatic,arrayOfBettersA.length);
             }
         } else {
 
@@ -129,7 +164,7 @@ contract predMarket {
                     arrWinner = arrayOfBettersA;
                     arrWinner[betterPosition].amount -= potentialBet;
                 }else{
-                    return (0,0,0,0);
+                    return (0,0,0,0,potBStatic,arrayOfBettersA.length);
                 }
                 
             }
@@ -150,10 +185,10 @@ contract predMarket {
             payout2 = payout;
             if (i == betterPosition) {
                 if (potB < payout) {
-                    return (payout2, potB, (potB * oddsBetA[1]) / oddsBetA[0],arrWinner[i].amount);
+                    return (payout2, potB, (potB * oddsBetA[1]) / oddsBetA[0],arrWinner[i].amount,potBStatic,arrayOfBettersA.length);
                 } else {
                     risk = (payout * oddsBetA[1]) / oddsBetA[0];
-                    return (payout2, payout, arrWinner[i].amount,arrWinner[i].amount);
+                    return (payout2, payout, arrWinner[i].amount,arrWinner[i].amount,potBStatic,arrayOfBettersA.length);
                 }
             } else {
                 if (potB >= payout) {
@@ -163,12 +198,13 @@ contract predMarket {
                 }
             }
         }
-        return (payout2,0, 0,arrWinner[betterPosition].amount); // Return default values if no condition is met
+        return (payout2,0, 0,arrWinner[betterPosition].amount,potBStatic,arrayOfBettersA.length); // Return default values if no condition is met
     }
 
-    function winLossBetB(uint256 potentialBet,bool addition) public view returns(uint256, uint256, uint256, uint256) {
+    function winLossBetB(uint256 potentialBet,bool addition) public view returns(uint256, uint256, uint256, uint256,uint256,uint256) {
         bool bettorExists = false;
-        uint256 potA = BetA; // Assuming BetA is declared somewhere in your contract
+        uint256 potA = BetA;
+        uint256 potAStatic = BetA; // Assuming BetA is declared somewhere in your contract
         uint betterPosition;
         better[] memory arrWinner;
 
@@ -191,7 +227,7 @@ contract predMarket {
                 arrWinner[arrayOfBettersB.length] = better(payable(msg.sender), potentialBet, oddsBetB);
                 betterPosition = arrayOfBettersB.length;
             }else{
-                return (0,0,0,0);
+                return (0,0,0,0,potAStatic,arrayOfBettersB.length);
             }
         } else {
             if(addition){
@@ -203,7 +239,7 @@ contract predMarket {
                     arrWinner = arrayOfBettersB;
                     arrWinner[betterPosition].amount -= potentialBet;
                 }else{
-                    return (0,0,0,0);
+                    return (0,0,0,0,potAStatic,arrayOfBettersB.length);
                 }
                 
             }
@@ -221,10 +257,10 @@ contract predMarket {
             payout2 = payout;
             if (i == betterPosition) {
                 if (potA < payout) {
-                    return (payout2, potA, (potA * oddsBetB[1]) / oddsBetB[0],arrWinner[betterPosition].amount);
+                    return (payout2, potA, (potA * oddsBetB[1]) / oddsBetB[0],arrWinner[betterPosition].amount,potAStatic,arrayOfBettersB.length);
                 } else {
                     risk = (payout * oddsBetB[1]) / oddsBetB[0];
-                    return (payout2 ,payout, arrWinner[i].amount,arrWinner[betterPosition].amount);
+                    return (payout2 ,payout, arrWinner[i].amount,arrWinner[betterPosition].amount,potAStatic,arrayOfBettersB.length);
                 }
             } else {
                 if (potA >= payout) {
@@ -234,160 +270,22 @@ contract predMarket {
                 }
             }
         }
-        return (payout2, 0, 0,arrWinner[betterPosition].amount); // Return default values if no condition is met
+        return (payout2, 0, 0,arrWinner[betterPosition].amount,potAStatic,arrayOfBettersB.length); // Return default values if no condition is met
     }
 
 
-//     function viewPotentialWinningsAndPotentialRiskA(uint256 potentialBet)public view returns(uint256,uint256) {
-//         //Responsible for paying the winner and dedudcting from the losers in the correct order
-//         uint i = 0;
-//         better[] memory arrWinner = arrayOfBettersA;
-//         better[] memory arrLost = arrayOfBettersB;
 
-//         uint j =0;
-//         uint arrOfWinner;
-//         uint previousBet = 0;
-
-        
-
-
-//         while(j<arrWinner.length){
-//             if(msg.sender == arrWinner[j].bettor){
-//                 arrOfWinner = j;
-//                 previousBet += arrWinner[j].amount + potentialBet;
-//                 arrWinner[j].amount += potentialBet;
-        
-//             }else{
-//             if(j+1 == arrWinner.length ){
-//                 better memory newbetter = better(payable(msg.sender),potentialBet,oddsBetA);
-
-//                 previousBet += potentialBet;
-//                 arrOfWinner = j+1;
-//                 arrWinner = new better[](j+2);
-//                 for(uint z = 0; z<=arrOfWinner;z++){
-//                     if(z == arrOfWinner){
-//                         arrWinner[z] = newbetter;
-//                     }else{
-//                         arrWinner[z] = arrayOfBettersA[z];
-//                     }
-                    
-//                 }
-//             }
-//             j++;
-//             }
-//         }
-
-//         while(i<arrWinner.length){
-           
-//             uint x = 0;
-//             uint winnerNeeds = (arrWinner[i].amount * arrWinner[i].odds[0])/arrWinner[i].odds[1] ;
-
-//             while (x < arrLost.length) {
-//                 if (arrLost[x].amount <= 0) {
-//                     x++; // Move to the next element if the current element is 0
-//                 } else if (arrLost[x].amount > winnerNeeds) {
-//                     arrLost[x].amount -= winnerNeeds;
-//                     arrWinner[i].amount += winnerNeeds;
-//                     break;
-//                      // Winner keeps original value and receives additional amount based on the odds
-//                     // Removed console.log as it's not supported in Solidity
-//                     // break; // Break is not necessary as return already exits the function
-//                 } else {
-//                     winnerNeeds -= arrLost[x].amount;
-//                     arrWinner[i].amount += arrLost[x].amount;
-//                     arrLost[x].amount = 0; // Set the current element to 0
-//                     x++; // Move to the next element
-//                 }
-//             }
-//             i++;
-        
-//     }
-//     uint256 reward = arrWinner[j].amount - previousBet;
-//     uint256 risk = (reward*arrWinner[0].odds[1])/arrWinner[0].odds[0];
-//     return(reward,risk);
-//     //Risk = (reward*odds[1])/odds[0]
-
-//    }
-
-//    function viewPotentialWinningsAndPotentialRiskB(uint256 potentialBet)public view returns(uint256,uint256) {
-//         //Responsible for paying the winner and dedudcting from the losers in the correct order
-//         uint i = 0;
-//         better[] memory arrWinner = arrayOfBettersB;
-//         better[] memory arrLost = arrayOfBettersA;
-
-//         uint j =0;
-//         uint arrOfWinner;
-//         uint previousBet = 0;
-
-        
-
-
-//         while(j<arrWinner.length){
-//             if(msg.sender == arrWinner[j].bettor){
-//                 arrOfWinner = j;
-//                 previousBet += arrWinner[j].amount + potentialBet;
-//                 arrWinner[j].amount += potentialBet;
-        
-//             }else{
-//             if(j+1 == arrWinner.length ){
-//                 better memory newbetter = better(payable(msg.sender),potentialBet,oddsBetB);
-
-//                 previousBet += potentialBet;
-//                 arrOfWinner = j+1;
-//                 arrWinner = new better[](j+2);
-//                 for(uint z = 0; z<=arrOfWinner;z++){
-//                     if(z == arrOfWinner){
-//                         arrWinner[z] = newbetter;
-//                     }else{
-//                         arrWinner[z] = arrayOfBettersB[z];
-//                     }
-                    
-//                 }
-//             }
-//             j++;
-//             }
-//         }
-
-//         while(i<arrWinner.length){
-           
-//             uint x = 0;
-//             uint winnerNeeds = (arrWinner[i].amount * arrWinner[i].odds[0])/arrWinner[i].odds[1] ;
-
-//             while (x < arrLost.length) {
-//                 if (arrLost[x].amount <= 0) {
-//                     x++; // Move to the next element if the current element is 0
-//                 } else if (arrLost[x].amount > winnerNeeds) {
-//                     arrLost[x].amount -= winnerNeeds;
-//                     arrWinner[i].amount += winnerNeeds;
-//                     break;
-//                      // Winner keeps original value and receives additional amount based on the odds
-//                     // Removed console.log as it's not supported in Solidity
-//                     // break; // Break is not necessary as return already exits the function
-//                 } else {
-//                     winnerNeeds -= arrLost[x].amount;
-//                     arrWinner[i].amount += arrLost[x].amount;
-//                     arrLost[x].amount = 0; // Set the current element to 0
-//                     x++; // Move to the next element
-//                 }
-//             }
-//             i++;
-        
-//     }
-//     uint256 reward = arrWinner[j].amount - previousBet;
-//     uint256 risk = (reward*arrWinner[0].odds[1])/arrWinner[0].odds[0];
-//     return(reward,risk);
-//     //Risk = (reward*odds[1])/odds[0]
-
-//    }
 
    function getBalance() public view returns (uint) {
         return address(this).balance;
     }
 
 
-    function assignEveryoneAmount() public onlyOwner{
-        require(s_raffleState== RaffleState.VOTING);
-        require(block.timestamp>=voteTime);
+    function assignEveryoneAmount() public ownerOrStaff{
+        require((s_raffleState== RaffleState.VOTING && block.timestamp >= voteTime) || (s_raffleState == RaffleState.SETTLED));
+        if(s_raffleState ==RaffleState.SETTLED){
+            require(msg.sender== staffWallet);
+        }
         if(winner==0){
             emptyLosingArray(arrayOfBettersA,arrayOfBettersB);
             s_raffleState = RaffleState.PAYOUT;
@@ -401,70 +299,34 @@ contract predMarket {
             s_raffleState = RaffleState.PAYOUT;
 
         }
+        if(msg.sender == owner){
+            payable(owner).transfer(locked);
+        }
 
     }
-    // function payoutA() public{
-        // uint x = 0;
-        // uint pot =  BetB;
 
 
-        // while(x<arrayOfBettersA.length){
-        //     if((arrayOfBettersA[x].amount*arrayOfBettersA[x].odds[0])/arrayOfBettersA[x].odds[1] <= pot){
-        //         pot -= (arrayOfBettersA[x].amount*arrayOfBettersA[x].odds[0])/arrayOfBettersA[x].odds[1];
-        //         (arrayOfBettersA[x].amount) = emptyLosingArray(arrayOfBettersB,arrayOfBettersA[x].amount,arrayOfBettersA[x].odds);
-        //         (bool success, ) = arrayOfBettersA[x].bettor.call{value: arrayOfBettersA[x].amount}("");
-        //         require(success, "Transfer failed");
-        //     }
-        //     else{
-        //         (arrayOfBettersA[x].amount) = emptyLosingArray(arrayOfBettersB,arrayOfBettersA[x].amount,arrayOfBettersA[x].odds);
-        //         (bool success, ) = arrayOfBettersA[x].bettor.call{value: pot}("");
-        //         require(success, "Transfer failed");
-        //         pot = 0;
-        //     }
+  
 
-        //     }
-        // uint i = 0;
-        // while(i<arrayOfBettersB.length){
-        //     if(arrayOfBettersB[i].amount == 0 ){
-        //         i++;
-        //     }else{
-        //     (bool success, ) = arrayOfBettersB[i].bettor.call{value: arrayOfBettersB[i].amount}("");
-        //     require(success, "Transfer failed");
-        //     }
-        //     }
-        //  }
-    // function returnAll(better[] storage betA,better[] storage betB)public{
-    //     uint x = 0;
-    //     uint i = 0;
-    //     while(x<betA.length){
-    //         (bool success, ) = betA[x].bettor.call{value: betA[x].amount}("");
-    //         require(success, "Transfer failed");
-    //     }
-    //     while(i<betB.length){
-    //         (bool success, ) = betB[i].bettor.call{value: betB[i].amount}("");
-    //         require(success, "Transfer failed");
-    //     }
-    // }
+    function payBuyIn() public payable {
+        // Check that the user hasn't bought in yet
+        require(!boughtIn[msg.sender], "User already bought in");
+        require(block.timestamp <endTime);
 
+        // Check that the exact buy-in amount is sent
+        require(msg.value == buyIn, "Incorrect buy-in amount");
 
+        // Mark the user as having bought in
+        boughtIn[msg.sender] = true;
 
-    
-
-//    for (let i = 0; i < arrayA.length; i++) {
-//     if (arrayA[i] * 3 <= potB) {
-//         arrayA[i] = emptyArray(arrayB, arrayA[i]); // Update arrayA[i] with the returned value
-//         potB -= arrayA[i] * 3;
-//     } else {
-//         arrayA[i] =emptyArray(arrayB, arrayA[i]);
-//         potB = 0;
-//     }
-// }
-
-
-    
-   
+        // Transfer the buy-in funds to the owner
+        locked += msg.value;
+        emit userBoughtIn(msg.sender);
+    }
     function betOnBetA() public payable returns(uint){
         require(s_raffleState== RaffleState.OPEN);
+        require(boughtIn[msg.sender], "Must buy in before betting");
+        require(block.timestamp <endTime);
         uint i = 0;
         while(i<arrayOfBettersA.length){
             if(arrayOfBettersA[i].bettor == msg.sender){
@@ -479,11 +341,14 @@ contract predMarket {
         BetA += msg.value;
         //If s_bettersOnA does not contain msg.sender then += msg.sender
         arrayOfBettersA.push(newbetter);
+        emit userPlacedBet(msg.sender,msg.value);
         return 0;
     }
 
     function betOnBetB() public payable returns(uint){
         require(s_raffleState== RaffleState.OPEN);
+        require(block.timestamp <endTime);
+        require(boughtIn[msg.sender], "Must buy in before betting");
         uint i = 0;
         while(i<arrayOfBettersB.length){
             if(arrayOfBettersB[i].bettor == msg.sender){
@@ -498,26 +363,26 @@ contract predMarket {
         BetB += msg.value;
         //If s_bettersOnA does not contain msg.sender then += msg.sender
         arrayOfBettersB.push(newbetter);
+        emit userPlacedBet(msg.sender,msg.value);
         return 0;
     }
 
-    function reduceBetA(uint256 reduction)public{
+    function reduceBetA(uint256 reduction)public nonReentrant{
         require(s_raffleState== RaffleState.OPEN);
+        require(block.timestamp <endTime);
         uint i = 0;
         while(i<arrayOfBettersA.length){
             if(arrayOfBettersA[i].bettor==msg.sender){
                 if(arrayOfBettersA[i].amount>= reduction){
-                    
-                    (bool success, ) = arrayOfBettersA[i].bettor.call{value: reduction}("");
-                    require(success, "Transfer failed");
                     arrayOfBettersA[i].amount -= reduction;
                     BetA -= reduction;
-                    break;
-                }else{
-                    if(i == arrayOfBettersA.length -1 ){
-                        revert didNotBet("Not On Bet A");
-                    }
                     
+                    // (bool success, ) = arrayOfBettersA[i].bettor.call{value: reduction}("");
+                    // require(success, "Transfer failed");
+                    arrayOfBettersA[i].bettor.transfer(reduction);
+                   
+                    emit userReducedBet(msg.sender,reduction);
+                    break;
                 }
             }
             else{
@@ -525,43 +390,20 @@ contract predMarket {
             }
         }
     }
-    function reduceBetB(uint256 reduction)public{
+    function reduceBetB(uint256 reduction)public nonReentrant {
         require(s_raffleState== RaffleState.OPEN);
+        require(block.timestamp <endTime);
         uint i = 0;
         while(i<arrayOfBettersB.length){
             if(arrayOfBettersB[i].bettor==msg.sender){
                 if(arrayOfBettersB[i].amount>= reduction){
-                    (bool success, ) = arrayOfBettersB[i].bettor.call{value: reduction}("");
-                    require(success, "Transfer failed");
                     arrayOfBettersB[i].amount -= reduction;
                     BetB -= reduction;
-                    break;
-                }else{
-                    if(i == arrayOfBettersB.length -1 ){
-                        revert didNotBet("Not On Bet B");
-                    }
-
-                }
-            }
-            else{
-                i++;
-            }
-        }
-    }
-
-    function withdrawA()public{
-        require(s_raffleState == RaffleState.OPEN || s_raffleState == RaffleState.PAYOUT);
-
-        uint i = 0;
-        while(i<arrayOfBettersA.length){
-            if(arrayOfBettersA[i].bettor==msg.sender){
-                if(arrayOfBettersA[i].amount > 0){
-                    if(s_raffleState == RaffleState.OPEN){
-                        BetA -=arrayOfBettersA[i].amount;
-                    }
-                    (bool success, ) = arrayOfBettersA[i].bettor.call{value: arrayOfBettersA[i].amount}("");
-                    require(success, "Transfer failed");
-                    arrayOfBettersA[i].bettor = payable(address(0));
+                    // (bool success, ) = arrayOfBettersB[i].bettor.call{value: reduction}("");
+                    // require(success, "Transfer failed");
+                    arrayOfBettersB[i].bettor.transfer(reduction);
+                    
+                    emit userReducedBet(msg.sender,reduction);
                     break;
                 }
             }
@@ -569,44 +411,60 @@ contract predMarket {
                 i++;
             }
         }
-
     }
 
-    function withdrawB()public{
-        require(s_raffleState == RaffleState.OPEN || s_raffleState == RaffleState.PAYOUT);
+  
 
-        uint i = 0;
-        while(i<arrayOfBettersB.length){
-            if(arrayOfBettersB[i].bettor==msg.sender){
-                if(arrayOfBettersB[i].amount >0){
-                    if(s_raffleState == RaffleState.OPEN){
-                        BetB -=arrayOfBettersB[i].amount;
-                    }
-                    (bool success, ) = arrayOfBettersB[i].bettor.call{value: arrayOfBettersB[i].amount}("");
-                    require(success, "Transfer failed");
-                    arrayOfBettersB[i].bettor = payable(address(0));
-                    break;
-                }
-            }
-            else{
-                i++;
+    function withdraw() public nonReentrant {
+        require( s_raffleState == RaffleState.PAYOUT, "Raffle not in correct state for withdrawal");
+
+        bool withdrawnA = false;
+        bool withdrawnB = false;
+
+        // Withdraw from A
+        for (uint i = 0; i < arrayOfBettersA.length; i++) {
+            if (arrayOfBettersA[i].bettor == msg.sender && arrayOfBettersA[i].amount > 0) {
+                BetA -= arrayOfBettersA[i].amount;
+                // (bool successA, ) = arrayOfBettersA[i].bettor.call{value: arrayOfBettersA[i].amount}("");
+                // require(successA, "Transfer from A failed");
+                arrayOfBettersA[i].bettor = payable(address(0));
+                emit userWithdrewBet(msg.sender, "A");
+                withdrawnA = true;
+                arrayOfBettersA[i].bettor.transfer(arrayOfBettersA[i].amount);
+                break; // Assuming a user can only be once in the array
             }
         }
 
-    }
-
-    function voteDisagree()public{
-        require(s_raffleState== RaffleState.VOTING);
-        disagree +=1;
-        if(disagree>=5){
-            s_raffleState = RaffleState.UNDERREVIEW;
+        // Withdraw from B
+        for (uint i = 0; i < arrayOfBettersB.length; i++) {
+            if (arrayOfBettersB[i].bettor == msg.sender && arrayOfBettersB[i].amount > 0) {
+                BetB -= arrayOfBettersB[i].amount;//this doesn't need to be in idt if withdraw is only available during payout
+                // (bool successB, ) = arrayOfBettersB[i].bettor.call{value: arrayOfBettersB[i].amount}("");
+                // require(successB, "Transfer from B failed");
+                arrayOfBettersB[i].bettor = payable(address(0));
+                emit userWithdrewBet(msg.sender, "B");
+                withdrawnB = true;
+                arrayOfBettersB[i].bettor.transfer(arrayOfBettersB[i].amount);
+                break; // Assuming a user can only be once in the array
+            }
         }
+
+        require(withdrawnA || withdrawnB, "No bets found to withdraw");
     }
 
-    function endBet(uint8 wlc)public onlyOwner{
-        //owner determines winner
-        // require(s_raffleState== RaffleState.OPEN);
-        // require(block.timestamp>=endTime);
+
+    function voteDisagree()public payable{
+        require((block.timestamp+300) >= endTime && s_raffleState != RaffleState.UNDERREVIEW);
+        require(msg.value == 50000000000000000);
+        locked += msg.value;
+        s_raffleState = RaffleState.UNDERREVIEW;
+        disagreeUser = msg.sender;
+        emit underReview();
+    }
+
+    function endBetOwner(uint8 wlc)public onlyOwner{
+        require(block.timestamp>=endTime);
+        require(s_raffleState==RaffleState.OPEN);
 
         require(wlc==0||wlc==1||wlc==2,"invalid input");
 
@@ -618,11 +476,59 @@ contract predMarket {
         }
         else{
             winner =2;
-            
         }
+        voteTime = block.timestamp + 300;
         s_raffleState = RaffleState.VOTING;
-        voteTime = block.timestamp + 86400;
+        emit winnerDeclaredVoting(wlc,voteTime);
+        
     }
+
+    function endBetStaff(uint8 wlc,bool disagreedUserCorrect, bool ownerCorrect)public onlyStaff nonReentrant {
+        require(block.timestamp>=endTime);
+        require( s_raffleState==RaffleState.UNDERREVIEW);
+
+        require(wlc==0||wlc==1||wlc==2,"invalid input");
+
+
+        if(wlc==0){
+            winner =0;
+        }else if(wlc==1){
+            winner =1;
+        }
+        else{
+            winner =2;
+        }
+        if(disagreedUserCorrect == true && ownerCorrect ==false){
+            s_raffleState = RaffleState.SETTLED;
+            // (bool successB, ) = disagreeUser.call{value: locked}("");
+            // require(successB, "Transfer to user failed");
+            payable(disagreeUser).transfer(locked);
+            emit winnerFinalized(wlc);
+            
+        }else if(disagreedUserCorrect == false && ownerCorrect ==true){
+            s_raffleState = RaffleState.SETTLED;
+            // (bool successB, ) = owner.call{value: locked}("");
+            // require(successB, "Transfer to user failed");
+            payable(owner).transfer(locked);
+            emit winnerFinalized(wlc);
+        }else{
+            s_raffleState = RaffleState.SETTLED;
+            if(wlc==0){
+                BetA += locked;
+            }
+            else if(wlc==1){
+                BetB += locked;
+            }
+            else{
+                BetA += locked/2;
+                BetB += locked/2;
+            }
+            emit winnerFinalized(wlc);
+        }
+        
+    }
+
+
 
     function betterInfo() public view returns (better memory, better memory) {
         better memory emptyBetter;
@@ -657,7 +563,7 @@ contract predMarket {
     }
 
     function isOwner() public view returns(bool){
-        if(msg.sender == owner){
+        if((msg.sender == owner)||(msg.sender==staffWallet)){
             return true;
         }else{
             return false;
@@ -666,6 +572,26 @@ contract predMarket {
 
     function getRaffleState() public view returns (RaffleState){
         return s_raffleState;
+    }
+    function getUserAmount() public view returns(uint){
+        uint256 amount;// measures amount won
+
+        for (uint i = 0; i < arrayOfBettersA.length; i++) {
+            if (arrayOfBettersA[i].bettor == msg.sender && arrayOfBettersA[i].amount > 0) {
+                amount += arrayOfBettersA[i].amount;
+                break; // Assuming a user can only be once in the array
+            }
+        }
+        // Withdraw from B
+        for (uint i = 0; i < arrayOfBettersB.length; i++) {
+            if (arrayOfBettersB[i].bettor == msg.sender && arrayOfBettersB[i].amount > 0) {
+                amount += arrayOfBettersB[i].amount;
+                break; // Assuming a user can only be once in the array
+            }
+        }
+        return(amount);
+
+
     }
 
     

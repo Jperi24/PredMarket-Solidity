@@ -3,7 +3,7 @@ require("hardhat-gas-reporter");
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
-  solidity: "0.8.19",
+  solidity: "0.8.20",
   gasReporter: {
     enabled: true, // Set to false to disable the gas reporter
     currency: "USD", // You can set this to your preferred currency
