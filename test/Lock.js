@@ -1,12 +1,12 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("predMarket", function () {
+describe("predMarket2", function () {
   this.timeout(60000);
   it("Deployment should assign the total supply of tokens to the owner", async function () {
     const [owner, user1, user2, user3, user4] = await ethers.getSigners();
 
-    const predMarketI = await ethers.getContractFactory("predMarket");
+    const predMarketI = await ethers.getContractFactory("predMarket2");
     const predMarket = await predMarketI.deploy(86400, 2, 1);
 
     console.log((await ethers.provider.getBalance(owner.address)) + " owner");

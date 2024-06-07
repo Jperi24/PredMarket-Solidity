@@ -13,19 +13,22 @@ contract predMarket2 is ReentrancyGuard {
    
 
     uint256 public endOfVoting;
+    uint256 endTime;
+    uint64 public payment = 50000000000000000;
     uint8 public winner;
     RaffleState private s_raffleState;
-    uint256 endTime;
+    mapping(address => uint256[])public betsByUser;
+    
 
 
 
-    mapping(address => uint256)public betterBalance;
+    
    
 
 
-
+    event winnerDeclaredVotingStaff(uint8 winnerIs);
     event contractDeployed(uint256 timeStamp);
-    event winnerDeclaredVoting(uint8 winnerIs);
+    event winnerDeclaredVoting(uint8 winnerIs,uint256 endedAtTime);
     event winnerFinalized(uint8 winnerIs);
     event userPlacedBet(address indexed sender, uint256 betPlacedValue);
     event userReducedBet(address indexed sender, uint256 betReduced);
@@ -34,13 +37,13 @@ contract predMarket2 is ReentrancyGuard {
     event newBetOffered();
     event shithappened();
     event BetUnlisted(uint indexed positionOfArray);
+    event userVoted();
 
     enum RaffleState {
         OPEN,
         VOTING,
         UNDERREVIEW,
-        SETTLED,
-        PAYOUT
+        SETTLED
     }
      
 
@@ -52,25 +55,15 @@ contract predMarket2 is ReentrancyGuard {
         owner = msg.sender;
         endTime = _endTime;
         s_raffleState = RaffleState.OPEN;
-        
-
 
 
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only the owner can call this function.");
-        _;
-    }
-    modifier onlyStaff(){
-        require(msg.sender == staffWallet);
+    modifier onlyOwnerOrStaff() {
+        require(msg.sender == owner || msg.sender == staffWallet, "Only the owner can call this function.");
         _;
     }
 
-    modifier ownerOrStaff(){
-        require(msg.sender ==owner || msg.sender == staffWallet);
-        _;
-    }
 
 
 
@@ -90,18 +83,19 @@ contract predMarket2 is ReentrancyGuard {
         
     }
 
-     bet[] public arrayOfBets;
+    bet[] public arrayOfBets;
 
-    function sellANewBet(uint256 amountToBuy,uint8 conditionToWIn ) public payable{
+    function sellANewBet(uint256 amountToBuy,uint8 conditionToWIn ) public payable nonReentrant{
         require(conditionToWIn > 0 && conditionToWIn <= 2);
         require(s_raffleState == RaffleState.OPEN);
 
         bet memory newBet = bet(msg.sender,msg.value, msg.sender,0,amountToBuy, conditionToWIn,true,arrayOfBets.length);
+        betsByUser[msg.sender].push(arrayOfBets.length);
         arrayOfBets.push(newBet);
         emit shithappened();
     }
 
-    function unlistBets(uint[] memory positionsOfArray) public {
+    function unlistBets(uint[] memory positionsOfArray) public nonReentrant{
         // Loop through each position provided in the array
         for (uint i = 0; i < positionsOfArray.length; i++) {
             uint position = positionsOfArray[i];
@@ -119,29 +113,23 @@ contract predMarket2 is ReentrancyGuard {
 
  
 
-    // function listBet(uint positionOfArray)public{
-    //     require(arrayOfBets[positionOfArray].owner == msg.sender);
-    //     require(arrayOfBets[positionOfArray].selling == false);
-    //     arrayOfBets[positionOfArray].selling = true;
-    //     emit shithappened();
-    // }
-
-    function buyABet(uint positionOfArray) public payable{
+    function buyABet(uint positionOfArray) public payable nonReentrant{
         require(s_raffleState == RaffleState.OPEN);
         require(msg.value == arrayOfBets[positionOfArray].amountToBuyFor);
         require(arrayOfBets[positionOfArray].selling == true);
         if(arrayOfBets[positionOfArray].amountBuyerLocked ==0){
             arrayOfBets[positionOfArray].amountBuyerLocked += msg.value;
         }else{
-            betterBalance[arrayOfBets[positionOfArray].owner] += msg.value;
+             payable(arrayOfBets[positionOfArray].owner).transfer(msg.value);
         }
         arrayOfBets[positionOfArray].owner = msg.sender;
         arrayOfBets[positionOfArray].selling = false;
+        betsByUser[msg.sender].push(positionOfArray);
         emit shithappened();
 
     }
 
-    function sellAnExistingBet(uint positionOfArray, uint newAskingPrice)public{
+    function sellAnExistingBet(uint positionOfArray, uint newAskingPrice)public nonReentrant{
         require(s_raffleState == RaffleState.OPEN);
         require(arrayOfBets[positionOfArray].owner == msg.sender);
         arrayOfBets[positionOfArray].amountToBuyFor = newAskingPrice;
@@ -149,89 +137,123 @@ contract predMarket2 is ReentrancyGuard {
         emit shithappened();
     }
 
-    // function redeemBets()public onlyOwner{
-    //     require((s_raffleState == RaffleState.VOTING) && (block.timestamp> endOfVoting));
-
-    //     uint i = 0;
-    //     while(i<arrayOfBets.length){
-    //         if(arrayOfBets[i].conditionForBuyerToWin == winner){
-    //             //if the current owner wins the bet
-    //             betterBalance[arrayOfBets[i].owner] += 
-    //             (arrayOfBets[i].amountDeployerLocked + arrayOfBets[i].amountBuyerLocked);
-    //             i++;
-    //         }
-    //         else if (arrayOfBets[i].conditionForBuyerToWin == (winner + 1)){
-    //             betterBalance[arrayOfBets[i].deployer] += 
-    //             (arrayOfBets[i].amountDeployerLocked + arrayOfBets[i].amountBuyerLocked);
-    //             i++;
-    //         }else{
-    //             betterBalance[arrayOfBets[i].deployer] += arrayOfBets[i].amountDeployerLocked;
-    //             betterBalance[arrayOfBets[i].owner] += arrayOfBets[i].amountBuyerLocked;
-
-
-    //         }
-    //     }
-    //     emit shithappened();
-    //     s_raffleState = RaffleState.PAYOUT;
-
-    // }
+  
 
     event PayoutProcessed();
     event FundsRedistributed(address indexed beneficiary, uint amount);
 
-    function redeemBets() public onlyOwner {
-        // Ensure that the raffle is in the VOTING state and the current time is past the end of voting
-        require(s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting, "Redemption is not allowed at this time.");
+    
+    
 
-        for (uint i = 0; i < arrayOfBets.length; i++) {
-            uint totalAmount = arrayOfBets[i].amountDeployerLocked + arrayOfBets[i].amountBuyerLocked;
+    function declareWinner(uint8 _winner)public onlyOwnerOrStaff nonReentrant{
+        if(msg.sender == owner){
+            require(s_raffleState == RaffleState.OPEN);
+            uint256 currentTime = block.timestamp;
+            // endOfVoting = currentTime + 7200;
+            endOfVoting = currentTime + 7200;
+            s_raffleState = RaffleState.VOTING;
+            winner = _winner;
+            emit winnerDeclaredVoting(_winner,currentTime);
+            s_raffleState = RaffleState.VOTING;
+        }
+        else{
+            require(s_raffleState == RaffleState.UNDERREVIEW);
+        
+            winner = _winner;
+            emit winnerDeclaredVotingStaff(_winner);
+            s_raffleState = RaffleState.SETTLED;
+        }   
+    }
 
-            if (arrayOfBets[i].conditionForBuyerToWin == winner) {
-                // If the bet's condition matches the winner, the owner wins the total locked amount
-                betterBalance[arrayOfBets[i].owner] += totalAmount;
-                emit FundsRedistributed(arrayOfBets[i].owner, totalAmount);
-            } else if (arrayOfBets[i].conditionForBuyerToWin == winner + 1) {
-                // If the condition is one more than the winner, the deployer wins the total locked amount
-                betterBalance[arrayOfBets[i].deployer] += totalAmount;
-                emit FundsRedistributed(arrayOfBets[i].deployer, totalAmount);
+
+
+    function disagreeWithOwner()public payable nonReentrant{
+        require((s_raffleState == RaffleState.VOTING && block.timestamp < endOfVoting) || (s_raffleState == RaffleState.OPEN && block.timestamp > endTime), "Invalid state or time");
+        s_raffleState = RaffleState.UNDERREVIEW;
+        emit userVoted();
+    }
+
+    function allBets_Balance() public view returns(bet[] memory,uint256,uint8,RaffleState,uint256,uint256){
+        uint256 betterBalanceNew = 0;
+        
+
+        if(winner>0){
+            uint256[] storage userBets = betsByUser[msg.sender]; // Using storage directly to save on gas
+            if (winner == 3) {
+                for (uint i = 0; i < userBets.length; i++) {
+                    uint betIndex = userBets[i];
+                    bet storage currentBet = arrayOfBets[betIndex]; // Access the bet directly from storage
+                    if (currentBet.owner == msg.sender) {
+                        betterBalanceNew += currentBet.amountBuyerLocked;
+                        
+                    }
+                    if (currentBet.deployer == msg.sender) {
+                        betterBalanceNew += currentBet.amountDeployerLocked;
+                        
+                    }
+                }
             } else {
-                // Otherwise, redistribute the locked amounts back to the deployer and owner respectively
-                betterBalance[arrayOfBets[i].deployer] += arrayOfBets[i].amountDeployerLocked;
-                betterBalance[arrayOfBets[i].owner] += arrayOfBets[i].amountBuyerLocked;
-                emit FundsRedistributed(arrayOfBets[i].deployer, arrayOfBets[i].amountDeployerLocked);
-                emit FundsRedistributed(arrayOfBets[i].owner, arrayOfBets[i].amountBuyerLocked);
+                for (uint i = 0; i < userBets.length; i++) {
+                    uint betIndex = userBets[i];
+                    bet storage currentBet = arrayOfBets[betIndex];
+                    if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
+                        betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                    
+                    } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
+                        betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                        
+                    }
+                }
+            }
+    }
+        
+        return (arrayOfBets,endTime,winner,s_raffleState,endOfVoting,betterBalanceNew);
+    }
+
+    
+
+
+   function withdraw() public nonReentrant {
+    require((s_raffleState ==RaffleState.SETTLED) || (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting));
+  
+    uint256 betterBalanceNew = 0;
+    uint256[] storage userBets = betsByUser[msg.sender]; // Using storage directly to save on gas
+
+
+    if (winner == 3) {
+        for (uint i = 0; i < userBets.length; i++) {
+            uint betIndex = userBets[i];
+            bet storage currentBet = arrayOfBets[betIndex]; // Access the bet directly from storage
+            if (currentBet.owner == msg.sender) {
+                betterBalanceNew += currentBet.amountBuyerLocked;
+                currentBet.amountBuyerLocked = 0; // Reset to prevent re-withdrawal
+            }
+            if (currentBet.deployer == msg.sender) {
+                betterBalanceNew += currentBet.amountDeployerLocked;
+                currentBet.amountDeployerLocked = 0;
             }
         }
-
-        // Change the state to PAYOUT and emit the appropriate event
-        s_raffleState = RaffleState.PAYOUT;
-        emit PayoutProcessed();
+    } else {
+        for (uint i = 0; i < userBets.length; i++) {
+            uint betIndex = userBets[i];
+            bet storage currentBet = arrayOfBets[betIndex];
+            if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
+                betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                currentBet.amountBuyerLocked = 0;
+                currentBet.amountDeployerLocked = 0;
+            } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
+                betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                currentBet.amountBuyerLocked = 0;
+                currentBet.amountDeployerLocked = 0;
+            }
+        }
     }
 
-    function declareWinner(uint8 _winner)public onlyOwner{
-        require(s_raffleState == RaffleState.OPEN);
-        endOfVoting = block.timestamp + 7200;
-        s_raffleState = RaffleState.VOTING;
-        winner = _winner;
-        emit winnerDeclaredVoting(_winner);
-        s_raffleState = RaffleState.VOTING;
-    }
+    require(address(this).balance >= betterBalanceNew, "Contract does not have enough funds");
+    payable(msg.sender).transfer(betterBalanceNew);
+   
+}
 
-    function disagreeWithOwner()public payable{
-        require(s_raffleState == RaffleState.VOTING || (block.timestamp > (endTime)));
-        s_raffleState = RaffleState.UNDERREVIEW;
-    }
-
-    function allBets_Balance() public view returns(bet[] memory,uint256,uint256,uint8,RaffleState){
-        uint256 balance = betterBalance[msg.sender];
-        return (arrayOfBets,balance,endTime,winner,s_raffleState);
-    }
-
-
-    function withdraw() public nonReentrant {
-        payable(msg.sender).transfer(betterBalance[msg.sender]);
-        
-    }
    
 
    function getBalance() public view returns (uint) {
@@ -249,14 +271,7 @@ contract predMarket2 is ReentrancyGuard {
             return false;
         }
     }
-
-
-
-  
-
-    
-
-    
+ 
 
 }
 
