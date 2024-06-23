@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract predMarket2 is ReentrancyGuard {
 
-    address private immutable owner;
+    address public immutable owner;
     address private immutable staffWallet = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
    
 
@@ -14,8 +14,9 @@ contract predMarket2 is ReentrancyGuard {
 
     uint256 public endOfVoting;
     uint256 endTime;
-    uint64 public payment = 50000000000000000;
+    uint256 public creatorLocked;
     uint8 public winner;
+    address public disagreedUser;
     RaffleState private s_raffleState;
     mapping(address => uint256[])public betsByUser;
     
@@ -38,6 +39,7 @@ contract predMarket2 is ReentrancyGuard {
     event shithappened();
     event BetUnlisted(uint indexed positionOfArray);
     event userVoted();
+    
 
     enum RaffleState {
         OPEN,
@@ -51,7 +53,7 @@ contract predMarket2 is ReentrancyGuard {
  
 
     constructor(uint256 _endTime) payable {
-        require(msg.value == 50000000000000000, "Deployment requires exactly 0.05 Ether");
+        creatorLocked = msg.value;
         owner = msg.sender;
         endTime = _endTime;
         s_raffleState = RaffleState.OPEN;
@@ -118,10 +120,11 @@ contract predMarket2 is ReentrancyGuard {
         require(msg.value == arrayOfBets[positionOfArray].amountToBuyFor);
         require(arrayOfBets[positionOfArray].selling == true);
         if(arrayOfBets[positionOfArray].amountBuyerLocked ==0){
-            arrayOfBets[positionOfArray].amountBuyerLocked += msg.value;
+            arrayOfBets[positionOfArray].amountBuyerLocked = msg.value;
         }else{
              payable(arrayOfBets[positionOfArray].owner).transfer(msg.value);
         }
+        betsByUser[msg.sender].push(positionOfArray);
         arrayOfBets[positionOfArray].owner = msg.sender;
         arrayOfBets[positionOfArray].selling = false;
         betsByUser[msg.sender].push(positionOfArray);
@@ -145,7 +148,8 @@ contract predMarket2 is ReentrancyGuard {
     
     
 
-    function declareWinner(uint8 _winner)public onlyOwnerOrStaff nonReentrant{
+    function declareWinner(uint8 _winner,uint8 disagreeCorrect)public onlyOwnerOrStaff nonReentrant{
+        require((_winner>0) && (_winner < 4));
         if(msg.sender == owner){
             require(s_raffleState == RaffleState.OPEN);
             uint256 currentTime = block.timestamp;
@@ -154,11 +158,13 @@ contract predMarket2 is ReentrancyGuard {
             s_raffleState = RaffleState.VOTING;
             winner = _winner;
             emit winnerDeclaredVoting(_winner,currentTime);
-            s_raffleState = RaffleState.VOTING;
+           
         }
         else{
             require(s_raffleState == RaffleState.UNDERREVIEW);
-        
+            if(disagreeCorrect == 1){
+                payable(disagreedUser).transfer(creatorLocked);
+            }
             winner = _winner;
             emit winnerDeclaredVotingStaff(_winner);
             s_raffleState = RaffleState.SETTLED;
@@ -169,56 +175,70 @@ contract predMarket2 is ReentrancyGuard {
 
     function disagreeWithOwner()public payable nonReentrant{
         require((s_raffleState == RaffleState.VOTING && block.timestamp < endOfVoting) || (s_raffleState == RaffleState.OPEN && block.timestamp > endTime), "Invalid state or time");
+        require(msg.value == creatorLocked);
+        disagreedUser = msg.sender;
         s_raffleState = RaffleState.UNDERREVIEW;
+        creatorLocked += msg.value;
         emit userVoted();
     }
 
-    function allBets_Balance() public view returns(bet[] memory,uint256,uint8,RaffleState,uint256,uint256){
-        uint256 betterBalanceNew = 0;
-        
+    function allBets_Balance() public view returns (bet[] memory, uint256, uint8, RaffleState, uint256, uint256) {
+    uint256 betterBalanceNew = 0;
+    uint256 totalForCreatorCalculation = 0;  // To accumulate balance eligible for creator's take
+    uint256 creatorTake = 0;  // Variable to store the potential owner's take
+    uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
 
-        if(winner>0){
-            uint256[] storage userBets = betsByUser[msg.sender]; // Using storage directly to save on gas
-            if (winner == 3) {
-                for (uint i = 0; i < userBets.length; i++) {
-                    uint betIndex = userBets[i];
-                    bet storage currentBet = arrayOfBets[betIndex]; // Access the bet directly from storage
-                    if (currentBet.owner == msg.sender) {
-                        betterBalanceNew += currentBet.amountBuyerLocked;
-                        
-                    }
-                    if (currentBet.deployer == msg.sender) {
-                        betterBalanceNew += currentBet.amountDeployerLocked;
-                        
-                    }
+    if (winner > 0) {
+        if (winner == 3) {
+            for (uint i = 0; i < userBets.length; i++) {
+                uint betIndex = userBets[i];
+                bet storage currentBet = arrayOfBets[betIndex];
+                if (currentBet.owner == msg.sender) {
+                    betterBalanceNew += currentBet.amountBuyerLocked;
                 }
-            } else {
-                for (uint i = 0; i < userBets.length; i++) {
-                    uint betIndex = userBets[i];
-                    bet storage currentBet = arrayOfBets[betIndex];
-                    if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
-                        betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                    
-                    } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
-                        betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                        
-                    }
+                if (currentBet.deployer == msg.sender) {
+                    betterBalanceNew += currentBet.amountDeployerLocked;
                 }
             }
+        } else {
+            for (uint i = 0; i < userBets.length; i++) {
+                uint betIndex = userBets[i];
+                bet storage currentBet = arrayOfBets[betIndex];
+                if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
+                    betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                    totalForCreatorCalculation += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
+                    betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                    totalForCreatorCalculation += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                } else if (currentBet.deployer == msg.sender && currentBet.amountToBuyFor == 0) {
+                    betterBalanceNew += currentBet.amountDeployerLocked;
+                    // Do not add to totalForCreatorCalculation, no fee should be deducted in this case
+                }
+            }
+            // Calculate potential owner's take for the 'else' branch excluding specific condition
+            if (totalForCreatorCalculation > 0) {
+                creatorTake = totalForCreatorCalculation * 3 / 100;
+            }
+        }
     }
-        
-        return (arrayOfBets,endTime,winner,s_raffleState,endOfVoting,betterBalanceNew);
-    }
+    
+    // Ensure these variables are declared and properly managed within your contract
+    return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew);
+}
+
 
     
 
-
    function withdraw() public nonReentrant {
     require((s_raffleState ==RaffleState.SETTLED) || (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting));
+
+
+    uint256[] storage userBets = betsByUser[msg.sender];
+    
+    require(userBets.length>0);
   
     uint256 betterBalanceNew = 0;
-    uint256[] storage userBets = betsByUser[msg.sender]; // Using storage directly to save on gas
-
+    uint256 creatorPay;
 
     if (winner == 3) {
         for (uint i = 0; i < userBets.length; i++) {
@@ -233,32 +253,48 @@ contract predMarket2 is ReentrancyGuard {
                 currentBet.amountDeployerLocked = 0;
             }
         }
-    } else {
+        require(address(this).balance >= betterBalanceNew, "Contract does not have enough funds");
+        payable(msg.sender).transfer(betterBalanceNew);
+    } 
+    else {
         for (uint i = 0; i < userBets.length; i++) {
             uint betIndex = userBets[i];
             bet storage currentBet = arrayOfBets[betIndex];
             if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
                 betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
                 currentBet.amountBuyerLocked = 0;
                 currentBet.amountDeployerLocked = 0;
             } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
                 betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
                 currentBet.amountBuyerLocked = 0;
                 currentBet.amountDeployerLocked = 0;
+            } else if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+                betterBalanceNew += currentBet.amountDeployerLocked;
+                currentBet.amountDeployerLocked = 0;
+               
             }
         }
+
+
+        // Update balances
+        uint256 amountToTransfer = betterBalanceNew - (creatorPay *3/100);
+        if (creatorPay > 0) {
+            creatorLocked += (creatorPay*3/100); // Ensure this state variable is declared in your contract
+        }
+        require(address(this).balance >= amountToTransfer, "Contract does not have enough funds");
+        payable(msg.sender).transfer(amountToTransfer);
     }
 
-    require(address(this).balance >= betterBalanceNew, "Contract does not have enough funds");
-    payable(msg.sender).transfer(betterBalanceNew);
-   
 }
 
-   
-
-   function getBalance() public view returns (uint) {
-        return address(this).balance;
+    function transferOwnerAmount()public onlyOwnerOrStaff nonReentrant{
+        require((s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting), "Invalid state or time");
+        payable(owner).transfer(creatorLocked);
     }
+
+    
 
 
   
@@ -271,6 +307,8 @@ contract predMarket2 is ReentrancyGuard {
             return false;
         }
     }
+
+
  
 
 }
