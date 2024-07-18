@@ -214,3 +214,207 @@ describe("predMarket2", function () {
 
   // Add more tests as needed to ensure comprehensive coverage
 });
+
+describe.only("predMarket2 - allBets_Balance Tests", function () {
+  let predMarket2;
+  let owner, addr1, addr2, addr3, staff;
+
+  beforeEach(async function () {
+    [owner, addr1, addr2, addr3, staff] = await ethers.getSigners();
+
+    const PredMarket2 = await ethers.getContractFactory("predMarket2");
+    predMarket2 = await PredMarket2.deploy(3600, {
+      value: ethers.parseEther("1.0"),
+    }); // 1 hour endTime with initial ether
+  });
+
+  it("should return correct balances for winner == 3", async function () {
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    await predMarket2.connect(owner).declareWinner(3, 0);
+    await network.provider.send("evm_increaseTime", [7201]);
+    await network.provider.send("evm_mine");
+
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr1).allBets_Balance();
+    expect(winner).to.equal(3);
+    expect(betterBalanceNew).to.equal(ethers.parseEther("0.5"));
+  });
+
+  it("should return correct balances for user who deployed and owns a bet when they win", async function () {
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    await predMarket2.connect(owner).declareWinner(1, 0);
+
+    await network.provider.send("evm_increaseTime", [7201]);
+    await network.provider.send("evm_mine");
+
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr2).allBets_Balance();
+    console.log(
+      "Owner/Winner Balance SHould eaqual 1.5, actual: ",
+      betterBalanceNew
+    );
+
+    const addr2Balance = await ethers.provider.getBalance(addr2.address);
+    console.log(addr2Balance, "before withdraw");
+    await predMarket2.connect(addr2).withdraw();
+    const addr2Balance2 = await ethers.provider.getBalance(addr2.address);
+
+    console.log(addr2Balance2, "after withdraw");
+
+    expect(winner).to.equal(1);
+    expect(betterBalanceNew).to.equal(ethers.parseEther("1.5"));
+  });
+
+  it("should return correct balances for user who deployed and owns a bet when they lose", async function () {
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    await predMarket2.connect(owner).declareWinner(2, 0);
+    await network.provider.send("evm_increaseTime", [7201]);
+    await network.provider.send("evm_mine");
+
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr2).allBets_Balance();
+    expect(winner).to.equal(2);
+    expect(betterBalanceNew).to.equal(0);
+  });
+
+  it("should return correct balances for multiple bets", async function () {
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("2.0"), 2, {
+      value: ethers.parseEther("1.0"),
+    });
+    await predMarket2
+      .connect(addr3)
+      .buyABet(1, { value: ethers.parseEther("2.0") });
+
+    await predMarket2.connect(owner).declareWinner(1, 0);
+    await network.provider.send("evm_increaseTime", [7201]);
+    await network.provider.send("evm_mine");
+
+    const [
+      arrayOfBets1,
+      endTime1,
+      winner1,
+      s_raffleState1,
+      endOfVoting1,
+      betterBalanceNew1,
+    ] = await predMarket2.connect(addr1).allBets_Balance();
+    expect(winner1).to.equal(1);
+    expect(betterBalanceNew1).to.equal(ethers.parseEther("3.0"));
+    console.log("Expected 3.0 on addr1 : ", betterBalanceNew1);
+
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr2).allBets_Balance();
+    expect(winner).to.equal(1);
+    expect(betterBalanceNew).to.equal(ethers.parseEther("1.5"));
+    console.log("Expected 1.5 on addr1 : ", betterBalanceNew);
+
+    const [, , , , , betterBalanceNewAddr3] = await predMarket2
+      .connect(addr3)
+      .allBets_Balance();
+    expect(betterBalanceNewAddr3).to.equal(0);
+    console.log("Expected 0 on addr3 : ", betterBalanceNewAddr3);
+  });
+
+  it("should calculate creator fee correctly", async function () {
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    await predMarket2.connect(owner).declareWinner(1, 0);
+    await network.provider.send("evm_increaseTime", [7201]);
+    await network.provider.send("evm_mine");
+
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr2).allBets_Balance();
+    expect(winner).to.equal(1);
+    expect(betterBalanceNew).to.equal(ethers.parseEther("1.455")); // 1.5 - 3%
+  });
+
+  it("should handle the edge case of no bets correctly", async function () {
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr1).allBets_Balance();
+    expect(betterBalanceNew).to.equal(0);
+  });
+
+  it("should handle the edge case of user having no bets", async function () {
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    const [
+      arrayOfBets,
+      endTime,
+      winner,
+      s_raffleState,
+      endOfVoting,
+      betterBalanceNew,
+    ] = await predMarket2.connect(addr3).allBets_Balance();
+    expect(betterBalanceNew).to.equal(0);
+  });
+});

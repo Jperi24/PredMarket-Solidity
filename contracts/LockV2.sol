@@ -16,6 +16,7 @@ contract predMarket2 is ReentrancyGuard {
     uint256 endTime;
     uint256 public creatorLocked;
     uint8 public winner;
+    uint8 public disagreeCorrect;
     address public disagreedUser;
     RaffleState private s_raffleState;
     mapping(address => uint256[])public betsByUser;
@@ -38,7 +39,7 @@ contract predMarket2 is ReentrancyGuard {
     event newBetOffered();
     event shithappened();
     event BetUnlisted(uint indexed positionOfArray);
-    event userVoted();
+    event userVoted(string reason);
     
 
     enum RaffleState {
@@ -127,7 +128,7 @@ contract predMarket2 is ReentrancyGuard {
         betsByUser[msg.sender].push(positionOfArray);
         arrayOfBets[positionOfArray].owner = msg.sender;
         arrayOfBets[positionOfArray].selling = false;
-        betsByUser[msg.sender].push(positionOfArray);
+        
         emit shithappened();
 
     }
@@ -148,13 +149,13 @@ contract predMarket2 is ReentrancyGuard {
     
     
 
-    function declareWinner(uint8 _winner,uint8 disagreeCorrect)public onlyOwnerOrStaff nonReentrant{
+    function declareWinner(uint8 _winner,uint8 _disagreeCorrect)public onlyOwnerOrStaff nonReentrant{
         require((_winner>0) && (_winner < 4));
         if(msg.sender == owner){
             require(s_raffleState == RaffleState.OPEN);
             uint256 currentTime = block.timestamp;
             // endOfVoting = currentTime + 7200;
-            endOfVoting = currentTime + 7200;
+            endOfVoting = currentTime + 0;
             s_raffleState = RaffleState.VOTING;
             winner = _winner;
             emit winnerDeclaredVoting(_winner,currentTime);
@@ -162,9 +163,11 @@ contract predMarket2 is ReentrancyGuard {
         }
         else{
             require(s_raffleState == RaffleState.UNDERREVIEW);
-            if(disagreeCorrect == 1){
+            disagreeCorrect = _disagreeCorrect;
+            if(_disagreeCorrect == 1){
                 payable(disagreedUser).transfer(creatorLocked);
             }
+
             winner = _winner;
             emit winnerDeclaredVotingStaff(_winner);
             s_raffleState = RaffleState.SETTLED;
@@ -173,125 +176,129 @@ contract predMarket2 is ReentrancyGuard {
 
 
 
-    function disagreeWithOwner()public payable nonReentrant{
+    function disagreeWithOwner(string memory reason)public payable nonReentrant{
         require((s_raffleState == RaffleState.VOTING && block.timestamp < endOfVoting) || (s_raffleState == RaffleState.OPEN && block.timestamp > endTime), "Invalid state or time");
         require(msg.value == creatorLocked);
         disagreedUser = msg.sender;
         s_raffleState = RaffleState.UNDERREVIEW;
         creatorLocked += msg.value;
-        emit userVoted();
+        emit userVoted(reason);
     }
 
     function allBets_Balance() public view returns (bet[] memory, uint256, uint8, RaffleState, uint256, uint256) {
-    uint256 betterBalanceNew = 0;
-    uint256 totalForCreatorCalculation = 0;  // To accumulate balance eligible for creator's take
-    uint256 creatorTake = 0;  // Variable to store the potential owner's take
-    uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
+        uint256 betterBalanceNew = 0;
 
-    if (winner > 0) {
-        if (winner == 3) {
-            for (uint i = 0; i < userBets.length; i++) {
-                uint betIndex = userBets[i];
-                bet storage currentBet = arrayOfBets[betIndex];
-                if (currentBet.owner == msg.sender) {
-                    betterBalanceNew += currentBet.amountBuyerLocked;
-                }
-                if (currentBet.deployer == msg.sender) {
-                    betterBalanceNew += currentBet.amountDeployerLocked;
+    
+        uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
+
+        uint256 creatorPay = 0;
+        bool isWinnerThree = winner == 3;
+
+        for (uint256 i = 0; i < userBets.length; i++) {
+            uint256 betIndex = userBets[i];
+            bet storage currentBet = arrayOfBets[betIndex];
+
+            if(winner>0){
+
+                if (isWinnerThree) {
+                    if (currentBet.owner == msg.sender) {
+                        betterBalanceNew += currentBet.amountBuyerLocked;
+                    
+                    }
+                    if (currentBet.deployer == msg.sender) {
+                        betterBalanceNew += currentBet.amountDeployerLocked;
+                    
+                    }
+                } else {
+                    if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+                        betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+                    }
+                    else if (
+                        (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+                        (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+                    ) {
+                        betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                        creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                    
+                    } 
                 }
             }
-        } else {
-            for (uint i = 0; i < userBets.length; i++) {
-                uint betIndex = userBets[i];
-                bet storage currentBet = arrayOfBets[betIndex];
-                if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
-                    betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                    totalForCreatorCalculation += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
-                    betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                    totalForCreatorCalculation += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                } else if (currentBet.deployer == msg.sender && currentBet.amountToBuyFor == 0) {
-                    betterBalanceNew += currentBet.amountDeployerLocked;
-                    // Do not add to totalForCreatorCalculation, no fee should be deducted in this case
-                }
-            }
-            // Calculate potential owner's take for the 'else' branch excluding specific condition
-            if (totalForCreatorCalculation > 0) {
-                creatorTake = totalForCreatorCalculation * 3 / 100;
-            }
+            
         }
+        if (!isWinnerThree && creatorPay > 0) {
+                uint256 creatorFee = creatorPay * 3 / 100;
+                betterBalanceNew -= creatorFee;
+            }
+
+        
+        // Ensure these variables are declared and properly managed within your contract
+        return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew);
     }
-    
-    // Ensure these variables are declared and properly managed within your contract
-    return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew);
-}
 
 
     
 
-   function withdraw() public nonReentrant {
-    require((s_raffleState ==RaffleState.SETTLED) || (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting));
-
+  function withdraw() public nonReentrant {
+    require(
+        (s_raffleState == RaffleState.SETTLED) || 
+        (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting)
+    );
 
     uint256[] storage userBets = betsByUser[msg.sender];
-    
-    require(userBets.length>0);
-  
-    uint256 betterBalanceNew = 0;
-    uint256 creatorPay;
+    require(userBets.length > 0);
 
-    if (winner == 3) {
-        for (uint i = 0; i < userBets.length; i++) {
-            uint betIndex = userBets[i];
-            bet storage currentBet = arrayOfBets[betIndex]; // Access the bet directly from storage
+    uint256 betterBalanceNew = 0;
+    uint256 creatorPay = 0;
+    bool isWinnerThree = winner == 3;
+    for (uint256 i = 0; i < userBets.length; i++) {
+        uint256 betIndex = userBets[i];
+        bet storage currentBet = arrayOfBets[betIndex];
+
+        if (isWinnerThree) {
             if (currentBet.owner == msg.sender) {
                 betterBalanceNew += currentBet.amountBuyerLocked;
-                currentBet.amountBuyerLocked = 0; // Reset to prevent re-withdrawal
+                currentBet.amountBuyerLocked = 0;
             }
             if (currentBet.deployer == msg.sender) {
                 betterBalanceNew += currentBet.amountDeployerLocked;
                 currentBet.amountDeployerLocked = 0;
             }
-        }
-        require(address(this).balance >= betterBalanceNew, "Contract does not have enough funds");
-        payable(msg.sender).transfer(betterBalanceNew);
-    } 
-    else {
-        for (uint i = 0; i < userBets.length; i++) {
-            uint betIndex = userBets[i];
-            bet storage currentBet = arrayOfBets[betIndex];
-            if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
-                betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+        } else {
+            if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+                betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+                currentBet.amountDeployerLocked = 0;
                 currentBet.amountBuyerLocked = 0;
-                currentBet.amountDeployerLocked = 0;
-            } else if (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner) {
-                betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                currentBet.amountBuyerLocked = 0;
-                currentBet.amountDeployerLocked = 0;
-            } else if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
-                betterBalanceNew += currentBet.amountDeployerLocked;
-                currentBet.amountDeployerLocked = 0;
-               
             }
+            else if (
+                (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+                (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+            ) {
+                betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                currentBet.amountBuyerLocked = 0;
+                currentBet.amountDeployerLocked = 0;
+            } 
         }
-
-
-        // Update balances
-        uint256 amountToTransfer = betterBalanceNew - (creatorPay *3/100);
-        if (creatorPay > 0) {
-            creatorLocked += (creatorPay*3/100); // Ensure this state variable is declared in your contract
-        }
-        require(address(this).balance >= amountToTransfer, "Contract does not have enough funds");
-        payable(msg.sender).transfer(amountToTransfer);
     }
 
+    if (!isWinnerThree && creatorPay > 0) {
+        uint256 creatorFee = creatorPay * 3 / 100;
+        creatorLocked += creatorFee;
+        betterBalanceNew -= creatorFee;
+    }
+
+    require(betterBalanceNew>0);
+    require(address(this).balance >= betterBalanceNew, "Contract does not have enough funds");
+    payable(msg.sender).transfer(betterBalanceNew);
 }
 
+
     function transferOwnerAmount()public onlyOwnerOrStaff nonReentrant{
-        require((s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting), "Invalid state or time");
+        require(((s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting) || disagreeCorrect==2), "Invalid state or time");
+        require(creatorLocked > 0);
         payable(owner).transfer(creatorLocked);
+        creatorLocked = 0;
+
     }
 
     
