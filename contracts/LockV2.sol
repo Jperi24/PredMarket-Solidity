@@ -7,8 +7,27 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract predMarket2 is ReentrancyGuard {
 
     address public immutable owner;
-    address private immutable staffWallet = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+
+    address[] private staffWallets = [
+        0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 // Add more addresses as needed
+    ];
+
+
    
+   uint256 public staffPay;
+
+    modifier onlyStaff() {
+        bool isStaff = false;
+        for (uint256 i = 0; i < staffWallets.length; i++) {
+            if (staffWallets[i] == msg.sender) {
+                isStaff = true;
+                break;
+            }
+        }
+        require(isStaff, "Caller is not a staff member");
+        _;
+    }
+    
 
    
 
@@ -21,6 +40,7 @@ contract predMarket2 is ReentrancyGuard {
     RaffleState private s_raffleState;
     mapping(address => uint256[])public betsByUser;
     
+    
 
 
 
@@ -28,18 +48,17 @@ contract predMarket2 is ReentrancyGuard {
    
 
 
-    event winnerDeclaredVotingStaff(uint8 winnerIs);
-    event contractDeployed(uint256 timeStamp);
-    event winnerDeclaredVoting(uint8 winnerIs,uint256 endedAtTime);
-    event winnerFinalized(uint8 winnerIs);
-    event userPlacedBet(address indexed sender, uint256 betPlacedValue);
-    event userReducedBet(address indexed sender, uint256 betReduced);
-    event userWithdrewBet(address indexed sender,string betAorB);
-    event underReview();
-    event newBetOffered();
-    event shithappened();
-    event BetUnlisted(uint indexed positionOfArray);
-    event userVoted(string reason);
+    
+ 
+   
+    
+    event userCreatedABet();
+    event BetUnlisted();
+    event userBoughtBet();
+    event userReListedBet();
+    event winnerDeclaredVoting();
+    event userVoted();
+    event userWithdrew();
     
 
     enum RaffleState {
@@ -63,9 +82,18 @@ contract predMarket2 is ReentrancyGuard {
     }
 
     modifier onlyOwnerOrStaff() {
-        require(msg.sender == owner || msg.sender == staffWallet, "Only the owner can call this function.");
+        bool isStaff = false;
+        for (uint256 i = 0; i < staffWallets.length; i++) {
+            if (staffWallets[i] == msg.sender) {
+                isStaff = true;
+                break;
+            }
+        }
+        require(msg.sender == owner || isStaff, "Caller is not the owner or a staff member");
         _;
     }
+
+
 
 
 
@@ -79,10 +107,9 @@ contract predMarket2 is ReentrancyGuard {
         address owner;
         uint256 amountBuyerLocked;
         uint256 amountToBuyFor;
-        uint8 conditionForBuyerToWin;//0 a wins, 1 b wins, 2 draw
+        uint8 conditionForBuyerToWin;
         bool selling;
         uint256 positionInArray;
-    
         
     }
 
@@ -95,7 +122,7 @@ contract predMarket2 is ReentrancyGuard {
         bet memory newBet = bet(msg.sender,msg.value, msg.sender,0,amountToBuy, conditionToWIn,true,arrayOfBets.length);
         betsByUser[msg.sender].push(arrayOfBets.length);
         arrayOfBets.push(newBet);
-        emit shithappened();
+        emit userCreatedABet();
     }
 
     function unlistBets(uint[] memory positionsOfArray) public nonReentrant{
@@ -111,7 +138,7 @@ contract predMarket2 is ReentrancyGuard {
             // Emit an event for the unlisted bet
             
         }
-        emit shithappened();
+        emit BetUnlisted();
     }
 
  
@@ -124,21 +151,67 @@ contract predMarket2 is ReentrancyGuard {
             arrayOfBets[positionOfArray].amountBuyerLocked = msg.value;
         }else{
              payable(arrayOfBets[positionOfArray].owner).transfer(msg.value);
+             
         }
         betsByUser[msg.sender].push(positionOfArray);
         arrayOfBets[positionOfArray].owner = msg.sender;
         arrayOfBets[positionOfArray].selling = false;
         
-        emit shithappened();
+        emit userBoughtBet();
 
     }
+function editADeployedBet(
+    uint positionOfArray, 
+    uint newDeployPrice, 
+    uint newAskingPrice
+) 
+    public 
+    payable 
+    nonReentrant 
+{
+    // Ensure only the deployer can edit the bet
+    require(
+        arrayOfBets[positionOfArray].owner == msg.sender && 
+        arrayOfBets[positionOfArray].deployer == msg.sender, 
+        "Only the deployer can edit this bet"
+    );
+
+    bet storage currentBet = arrayOfBets[positionOfArray];
+    uint currentLockedAmount = currentBet.amountDeployerLocked;
+
+    if (newDeployPrice != currentLockedAmount) {
+        // Handle refund if the new deploy price is less than the current amount locked
+        if (newDeployPrice < currentLockedAmount) {
+            uint refundAmount = currentLockedAmount - newDeployPrice;
+            require(address(this).balance >= refundAmount, "Contract does not have enough funds");
+            currentBet.amountDeployerLocked = newDeployPrice;
+            payable(msg.sender).transfer(refundAmount);
+        } 
+        // Handle additional funds required if the new deploy price is greater
+        else {
+            uint additionalAmount = newDeployPrice - currentLockedAmount;
+            require(msg.value == additionalAmount, "Incorrect additional funds sent");
+            currentBet.amountDeployerLocked = newDeployPrice;
+        }
+    }
+
+    // Update the asking price
+    currentBet.amountToBuyFor = newAskingPrice;
+
+    // Ensure the bet is marked as selling if it wasn't already
+    if (!currentBet.selling) {
+        currentBet.selling = true;
+    }
+}
+
+
 
     function sellAnExistingBet(uint positionOfArray, uint newAskingPrice)public nonReentrant{
         require(s_raffleState == RaffleState.OPEN);
         require(arrayOfBets[positionOfArray].owner == msg.sender);
         arrayOfBets[positionOfArray].amountToBuyFor = newAskingPrice;
         arrayOfBets[positionOfArray].selling = true;
-        emit shithappened();
+        emit userReListedBet();
     }
 
   
@@ -154,11 +227,11 @@ contract predMarket2 is ReentrancyGuard {
         if(msg.sender == owner){
             require(s_raffleState == RaffleState.OPEN);
             uint256 currentTime = block.timestamp;
-            // endOfVoting = currentTime + 7200;
-            endOfVoting = currentTime + 0;
+            endOfVoting = currentTime + 72;
+            //endOfVoting = currentTime + 7200;
             s_raffleState = RaffleState.VOTING;
             winner = _winner;
-            emit winnerDeclaredVoting(_winner,currentTime);
+            emit winnerDeclaredVoting();
            
         }
         else{
@@ -167,38 +240,72 @@ contract predMarket2 is ReentrancyGuard {
             if(_disagreeCorrect == 1){
                 payable(disagreedUser).transfer(creatorLocked);
             }
+            else if(_disagreeCorrect == 3){
+                //transfer to staff money, set that up
+                staffPay += creatorLocked;
+            }
 
             winner = _winner;
-            emit winnerDeclaredVotingStaff(_winner);
+            emit winnerDeclaredVoting();
             s_raffleState = RaffleState.SETTLED;
         }   
     }
 
 
 
-    function disagreeWithOwner(string memory reason)public payable nonReentrant{
+
+
+    function disagreeWithOwner()public payable nonReentrant{
         require((s_raffleState == RaffleState.VOTING && block.timestamp < endOfVoting) || (s_raffleState == RaffleState.OPEN && block.timestamp > endTime), "Invalid state or time");
         require(msg.value == creatorLocked);
         disagreedUser = msg.sender;
         s_raffleState = RaffleState.UNDERREVIEW;
         creatorLocked += msg.value;
-        emit userVoted(reason);
+        emit userVoted();
+
     }
 
-    function allBets_Balance() public view returns (bet[] memory, uint256, uint8, RaffleState, uint256, uint256) {
+    function allBets_Balance() public view returns (bet[] memory, uint256, uint8, RaffleState, uint256, uint256,uint256,uint256) {
         uint256 betterBalanceNew = 0;
+        uint256 balanceIfWinnerIs1 = 0;
+        uint256 balanceIfWinnerIs2 = 0;
 
     
         uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
 
         uint256 creatorPay = 0;
         bool isWinnerThree = winner == 3;
+        bool isWinnerZero = winner ==0;
 
         for (uint256 i = 0; i < userBets.length; i++) {
             uint256 betIndex = userBets[i];
             bet storage currentBet = arrayOfBets[betIndex];
 
-            if(winner>0){
+            // if(isWinnerZero){
+            //     if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+            //             balanceIfWinnerIs1 += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+            //             balanceIfWinnerIs2 += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+            //         }
+            //     else if (
+            //         (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == 1) ||
+            //         (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin == 2)
+            //     ) {
+            //         balanceIfWinnerIs1 += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+            //         creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                   
+            //     }
+            //     else if (
+            //         (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == 2) ||
+            //         (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin == 1)
+            //     ) {
+            //         balanceIfWinnerIs2 += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+            //         creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+            //     }
+                
+
+            // }
+
+            if(!isWinnerZero){
 
                 if (isWinnerThree) {
                     if (currentBet.owner == msg.sender) {
@@ -226,13 +333,16 @@ contract predMarket2 is ReentrancyGuard {
             
         }
         if (!isWinnerThree && creatorPay > 0) {
-                uint256 creatorFee = creatorPay * 3 / 100;
+            
+                uint256 creatorFee = creatorPay * 5 / 100;
                 betterBalanceNew -= creatorFee;
+
             }
+            
 
         
         // Ensure these variables are declared and properly managed within your contract
-        return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew);
+        return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew,balanceIfWinnerIs1,balanceIfWinnerIs2);
     }
 
 
@@ -264,7 +374,8 @@ contract predMarket2 is ReentrancyGuard {
                 currentBet.amountDeployerLocked = 0;
             }
         } else {
-            if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+            bool isBothPartiesSame = currentBet.deployer == msg.sender && currentBet.owner == msg.sender;
+            if (isBothPartiesSame) {
                 betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
                 currentBet.amountDeployerLocked = 0;
                 currentBet.amountBuyerLocked = 0;
@@ -273,8 +384,9 @@ contract predMarket2 is ReentrancyGuard {
                 (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
                 (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
             ) {
-                betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                uint256 totalLockedAmount = currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                betterBalanceNew += totalLockedAmount;
+                creatorPay += totalLockedAmount;
                 currentBet.amountBuyerLocked = 0;
                 currentBet.amountDeployerLocked = 0;
             } 
@@ -282,14 +394,19 @@ contract predMarket2 is ReentrancyGuard {
     }
 
     if (!isWinnerThree && creatorPay > 0) {
-        uint256 creatorFee = creatorPay * 3 / 100;
+        uint256 creatorFee = (creatorPay * 300) / 10000; 
+        uint256 _staffPay = (creatorPay * 200) / 10000; 
+        staffPay += _staffPay;
         creatorLocked += creatorFee;
-        betterBalanceNew -= creatorFee;
+        betterBalanceNew -= (creatorFee + _staffPay);
     }
 
-    require(betterBalanceNew>0);
-    require(address(this).balance >= betterBalanceNew, "Contract does not have enough funds");
+    require(betterBalanceNew > 0, "No balance to withdraw");
+    require(address(this).balance >= betterBalanceNew, "Insufficient contract balance");
+
     payable(msg.sender).transfer(betterBalanceNew);
+
+    emit userWithdrew();
 }
 
 
@@ -301,22 +418,14 @@ contract predMarket2 is ReentrancyGuard {
 
     }
 
-    
-
-
-  
-
-
-    function isOwner() public view returns(bool){
-        if((msg.sender == owner)||(msg.sender==staffWallet)){
-            return true;
-        }else{
-            return false;
-        }
+    function transferStaffAmount()public onlyStaff nonReentrant{
+        require(((s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting) || disagreeCorrect==2), "Invalid state or time");
+        require(staffPay > 0);
+        payable(msg.sender).transfer(staffPay);
+        creatorLocked = 0;
     }
 
-
- 
+    
 
 }
 

@@ -215,7 +215,7 @@ describe("predMarket2", function () {
   // Add more tests as needed to ensure comprehensive coverage
 });
 
-describe.only("predMarket2 - allBets_Balance Tests", function () {
+describe("predMarket2 - allBets_Balance Tests", function () {
   let predMarket2;
   let owner, addr1, addr2, addr3, staff;
 
@@ -252,13 +252,32 @@ describe.only("predMarket2 - allBets_Balance Tests", function () {
     expect(betterBalanceNew).to.equal(ethers.parseEther("0.5"));
   });
 
-  it("should return correct balances for user who deployed and owns a bet when they win", async function () {
+  it.only("should return correct balances for user who deployed and owns a bet when they win", async function () {
     await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
       value: ethers.parseEther("0.5"),
     });
     await predMarket2
       .connect(addr2)
       .buyABet(0, { value: ethers.parseEther("1.0") });
+
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(1, { value: ethers.parseEther("1.0") });
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr2)
+      .buyABet(2, { value: ethers.parseEther("1.0") });
+    await predMarket2.connect(addr1).sellANewBet(ethers.parseEther("1.0"), 1, {
+      value: ethers.parseEther("0.5"),
+    });
+    await predMarket2
+      .connect(addr3)
+      .buyABet(3, { value: ethers.parseEther("1.0") });
 
     await predMarket2.connect(owner).declareWinner(1, 0);
 
@@ -272,18 +291,18 @@ describe.only("predMarket2 - allBets_Balance Tests", function () {
       s_raffleState,
       endOfVoting,
       betterBalanceNew,
-    ] = await predMarket2.connect(addr2).allBets_Balance();
+    ] = await predMarket2.connect(addr3).allBets_Balance();
     console.log(
       "Owner/Winner Balance SHould eaqual 1.5, actual: ",
       betterBalanceNew
     );
 
-    const addr2Balance = await ethers.provider.getBalance(addr2.address);
-    console.log(addr2Balance, "before withdraw");
-    await predMarket2.connect(addr2).withdraw();
-    const addr2Balance2 = await ethers.provider.getBalance(addr2.address);
+    const addr3Balance = await ethers.provider.getBalance(addr3.address);
+    console.log(addr3Balance, "before withdraw");
+    await predMarket2.connect(addr3).withdraw();
+    const addr3Balance2 = await ethers.provider.getBalance(addr3.address);
 
-    console.log(addr2Balance2, "after withdraw");
+    console.log(addr3Balance2, "after withdraw");
 
     expect(winner).to.equal(1);
     expect(betterBalanceNew).to.equal(ethers.parseEther("1.5"));
