@@ -59,6 +59,7 @@ contract predMarket2 is ReentrancyGuard {
     event winnerDeclaredVoting();
     event userVoted();
     event userWithdrew();
+    event BetEdited();
     
 
     enum RaffleState {
@@ -160,49 +161,7 @@ contract predMarket2 is ReentrancyGuard {
         emit userBoughtBet();
 
     }
-function editADeployedBet(
-    uint positionOfArray, 
-    uint newDeployPrice, 
-    uint newAskingPrice
-) 
-    public 
-    payable 
-    nonReentrant 
-{
-    // Ensure only the deployer can edit the bet
-    require(
-        arrayOfBets[positionOfArray].owner == msg.sender && 
-        arrayOfBets[positionOfArray].deployer == msg.sender, 
-        "Only the deployer can edit this bet"
-    );
-
-    bet storage currentBet = arrayOfBets[positionOfArray];
-    uint currentLockedAmount = currentBet.amountDeployerLocked;
-
-    if (newDeployPrice != currentLockedAmount) {
-        // Handle refund if the new deploy price is less than the current amount locked
-        if (newDeployPrice < currentLockedAmount) {
-            uint refundAmount = currentLockedAmount - newDeployPrice;
-            require(address(this).balance >= refundAmount, "Contract does not have enough funds");
-            currentBet.amountDeployerLocked = newDeployPrice;
-            payable(msg.sender).transfer(refundAmount);
-        } 
-        // Handle additional funds required if the new deploy price is greater
-        else {
-            uint additionalAmount = newDeployPrice - currentLockedAmount;
-            require(msg.value == additionalAmount, "Incorrect additional funds sent");
-            currentBet.amountDeployerLocked = newDeployPrice;
-        }
-    }
-
-    // Update the asking price
-    currentBet.amountToBuyFor = newAskingPrice;
-
-    // Ensure the bet is marked as selling if it wasn't already
-    if (!currentBet.selling) {
-        currentBet.selling = true;
-    }
-}
+    
 
 
 
@@ -227,7 +186,7 @@ function editADeployedBet(
         if(msg.sender == owner){
             require(s_raffleState == RaffleState.OPEN);
             uint256 currentTime = block.timestamp;
-            endOfVoting = currentTime + 72;
+            endOfVoting = currentTime + 300;
             //endOfVoting = currentTime + 7200;
             s_raffleState = RaffleState.VOTING;
             winner = _winner;
@@ -235,7 +194,6 @@ function editADeployedBet(
            
         }
         else{
-            require(s_raffleState == RaffleState.UNDERREVIEW);
             disagreeCorrect = _disagreeCorrect;
             if(_disagreeCorrect == 1){
                 payable(disagreedUser).transfer(creatorLocked);
@@ -265,106 +223,258 @@ function editADeployedBet(
 
     }
 
-    function allBets_Balance() public view returns (bet[] memory, uint256, uint8, RaffleState, uint256, uint256,uint256,uint256) {
-        uint256 betterBalanceNew = 0;
-        uint256 balanceIfWinnerIs1 = 0;
-        uint256 balanceIfWinnerIs2 = 0;
+    // function allBets_Balance() public view returns (bet[] memory, uint256, uint8, RaffleState, uint256, uint256,uint256,uint256) {
+    //     uint256 betterBalanceNew = 0;
+    //     uint256 balanceIfWinnerIs1 = 0;
+    //     uint256 balanceIfWinnerIs2 = 0;
 
     
-        uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
+    //     uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
 
-        uint256 creatorPay = 0;
-        bool isWinnerThree = winner == 3;
-        bool isWinnerZero = winner ==0;
+    //     uint256 creatorPay = 0;
+    //     bool isWinnerThree = winner == 3;
+    //     bool isWinnerZero = winner ==0;
 
-        for (uint256 i = 0; i < userBets.length; i++) {
-            uint256 betIndex = userBets[i];
-            bet storage currentBet = arrayOfBets[betIndex];
+    //     for (uint256 i = 0; i < userBets.length; i++) {
+    //         uint256 betIndex = userBets[i];
+    //         bet storage currentBet = arrayOfBets[betIndex];
 
-            // if(isWinnerZero){
-            //     if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
-            //             balanceIfWinnerIs1 += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
-            //             balanceIfWinnerIs2 += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
-            //         }
-            //     else if (
-            //         (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == 1) ||
-            //         (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin == 2)
-            //     ) {
-            //         balanceIfWinnerIs1 += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-            //         creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    //         // if(isWinnerZero){
+    //         //     if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+    //         //             balanceIfWinnerIs1 += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+    //         //             balanceIfWinnerIs2 += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+    //         //         }
+    //         //     else if (
+    //         //         (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == 1) ||
+    //         //         (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin == 2)
+    //         //     ) {
+    //         //         balanceIfWinnerIs1 += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    //         //         creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
                    
-            //     }
-            //     else if (
-            //         (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == 2) ||
-            //         (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin == 1)
-            //     ) {
-            //         balanceIfWinnerIs2 += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-            //         creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-            //     }
+    //         //     }
+    //         //     else if (
+    //         //         (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == 2) ||
+    //         //         (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin == 1)
+    //         //     ) {
+    //         //         balanceIfWinnerIs2 += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    //         //         creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    //         //     }
                 
 
-            // }
+    //         // }
 
-            if(!isWinnerZero){
+    //         if(!isWinnerZero){
 
-                if (isWinnerThree) {
-                    if (currentBet.owner == msg.sender) {
-                        betterBalanceNew += currentBet.amountBuyerLocked;
+    //             if (isWinnerThree) {
+    //                 if (currentBet.owner == msg.sender) {
+    //                     betterBalanceNew += currentBet.amountBuyerLocked;
                     
-                    }
-                    if (currentBet.deployer == msg.sender) {
-                        betterBalanceNew += currentBet.amountDeployerLocked;
+    //                 }
+    //                 if (currentBet.deployer == msg.sender) {
+    //                     betterBalanceNew += currentBet.amountDeployerLocked;
                     
-                    }
-                } else {
-                    if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
-                        betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
-                    }
-                    else if (
-                        (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
-                        (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
-                    ) {
-                        betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                        creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    //                 }
+    //             } else {
+    //                 if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+    //                     betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+    //                 }
+    //                 else if (
+    //                     (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+    //                     (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+    //                 ) {
+    //                     betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    //                     creatorPay += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
                     
-                    } 
-                }
-            }
+    //                 } 
+    //             }
+    //         }
             
-        }
-        if (!isWinnerThree && creatorPay > 0) {
+    //     }
+    //     if (!isWinnerThree && creatorPay > 0) {
             
-                uint256 creatorFee = creatorPay * 5 / 100;
-                betterBalanceNew -= creatorFee;
+    //             uint256 creatorFee = creatorPay * 5 / 100;
+    //             betterBalanceNew -= creatorFee;
 
-            }
+    //         }
             
 
         
-        // Ensure these variables are declared and properly managed within your contract
-        return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew,balanceIfWinnerIs1,balanceIfWinnerIs2);
+    //     // Ensure these variables are declared and properly managed within your contract
+    //     return (arrayOfBets, endTime, winner, s_raffleState, endOfVoting, betterBalanceNew,balanceIfWinnerIs1,balanceIfWinnerIs2);
+    // }
+
+
+
+    function allBets_Balance() 
+    public 
+    view 
+    returns (
+        bet[] memory, 
+        uint256, 
+        uint8, 
+        RaffleState, 
+        uint256, 
+        uint256, 
+        uint256, 
+        uint256
+    ) 
+    {
+    uint256 betterBalanceNew = 0;
+    uint256 balanceIfWinnerIs1 = 0;
+    uint256 balanceIfWinnerIs2 = 0;
+
+    uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
+
+    uint256 creatorPay = 0;
+    bool isWinnerThree = winner == 3;
+    bool isWinnerZero = winner == 0;
+
+    for (uint256 i = 0; i < userBets.length; i++) {
+        uint256 betIndex = userBets[i];
+        bet storage currentBet = arrayOfBets[betIndex];
+
+        if (!isWinnerZero) {
+            if (isWinnerThree) {
+                if (currentBet.owner == msg.sender) {
+                    betterBalanceNew += currentBet.amountBuyerLocked;
+                }
+                if (currentBet.deployer == msg.sender) {
+                    betterBalanceNew += currentBet.amountDeployerLocked;
+                }
+            } else {
+                if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+                    betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+                } else if (
+                    (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+                    (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+                ) {
+                    betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+                    if(currentBet.owner == msg.sender){
+                        creatorPay +=currentBet.amountDeployerLocked;
+                    }else{
+                        creatorPay +=currentBet.amountBuyerLocked;
+                    }
+                    
+                }
+            }
+        }
     }
+
+    if (!isWinnerThree && creatorPay > 0) {
+        uint256 creatorFee = (creatorPay * 5) / 100;
+        betterBalanceNew -= creatorFee;
+    }
+
+    // Ensure that `endTime`, `winner`, `s_raffleState`, and `endOfVoting` are properly defined in your contract
+    return (
+        arrayOfBets, 
+        endTime, 
+        winner, 
+        s_raffleState, 
+        endOfVoting, 
+        betterBalanceNew, 
+        balanceIfWinnerIs1, 
+        balanceIfWinnerIs2
+    );
+}
+
 
 
     
 
-  function withdraw() public nonReentrant {
+//   function withdraw() public nonReentrant {
+//     require(
+//         (s_raffleState == RaffleState.SETTLED) || 
+//         (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting)
+//     );
+
+//     uint256[] storage userBets = betsByUser[msg.sender];
+//     require(userBets.length > 0);
+
+//     uint256 betterBalanceNew = 0;
+//     uint256 creatorPay = 0;
+//     bool isWinnerThree = winner == 3;
+//     for (uint256 i = 0; i < userBets.length; i++) {
+//         uint256 betIndex = userBets[i];
+//         bet storage currentBet = arrayOfBets[betIndex];
+
+//         if (isWinnerThree) {
+//             if (currentBet.owner == msg.sender) {
+//                 betterBalanceNew += currentBet.amountBuyerLocked;
+//                 currentBet.amountBuyerLocked = 0;
+//             }
+//             if (currentBet.deployer == msg.sender) {
+//                 betterBalanceNew += currentBet.amountDeployerLocked;
+//                 currentBet.amountDeployerLocked = 0;
+//             }
+//         } else {
+//             bool isBothPartiesSame = currentBet.deployer == msg.sender && currentBet.owner == msg.sender;
+//             if (isBothPartiesSame) {
+//                 betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+//                 currentBet.amountDeployerLocked = 0;
+//                 currentBet.amountBuyerLocked = 0;
+//             }
+//             else if (
+//                 (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+//                 (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+//             ) {
+//                 uint256 totalLockedAmount = currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+//                 betterBalanceNew += totalLockedAmount;
+//                 if(currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner){
+//                     creatorPay += currentBet.amountDeployerLocked;
+//                     currentBet.amountBuyerLocked = 0;
+//                     currentBet.amountDeployerLocked = 0;
+//                 }
+//                 else{
+//                     creatorPay += currentBet.amountBuyerLocked;
+//                     currentBet.amountBuyerLocked = 0;
+//                     currentBet.amountDeployerLocked = 0;
+
+//                 }
+                
+//             } 
+//         }
+//     }
+
+//     if (!isWinnerThree && creatorPay > 0) {
+//         uint256 creatorFee = (creatorPay * 300) / 10000; 
+//         uint256 _staffPay = (creatorPay * 200) / 10000; 
+//         staffPay += _staffPay;
+//         creatorLocked += creatorFee;
+//         betterBalanceNew -= (creatorFee + _staffPay);
+//     }
+
+//     require(betterBalanceNew > 0, "No balance to withdraw");
+//     require(address(this).balance >= betterBalanceNew, "Insufficient contract balance");
+
+//     payable(msg.sender).transfer(betterBalanceNew);
+
+//     emit userWithdrew();
+// }
+
+function withdraw() public nonReentrant {
+    // Ensure the raffle is either SETTLED or in VOTING phase and voting has ended
     require(
         (s_raffleState == RaffleState.SETTLED) || 
-        (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting)
+        (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting),
+        "Cannot withdraw at this time"
     );
 
+    // Check if the user has placed any bets
     uint256[] storage userBets = betsByUser[msg.sender];
-    require(userBets.length > 0);
+    require(userBets.length > 0, "No bets found for user");
 
     uint256 betterBalanceNew = 0;
     uint256 creatorPay = 0;
     bool isWinnerThree = winner == 3;
+
+    // Iterate through each bet of the user
     for (uint256 i = 0; i < userBets.length; i++) {
         uint256 betIndex = userBets[i];
         bet storage currentBet = arrayOfBets[betIndex];
 
         if (isWinnerThree) {
+            // If winner is 3, clear locked amounts for the bet owner or deployer
             if (currentBet.owner == msg.sender) {
                 betterBalanceNew += currentBet.amountBuyerLocked;
                 currentBet.amountBuyerLocked = 0;
@@ -376,38 +486,97 @@ function editADeployedBet(
         } else {
             bool isBothPartiesSame = currentBet.deployer == msg.sender && currentBet.owner == msg.sender;
             if (isBothPartiesSame) {
+                // If the same user is both owner and deployer, unlock both amounts
                 betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
                 currentBet.amountDeployerLocked = 0;
                 currentBet.amountBuyerLocked = 0;
-            }
-            else if (
+            } else if (
                 (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
                 (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
             ) {
+                // If either the owner or deployer wins, transfer the locked amounts
                 uint256 totalLockedAmount = currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
                 betterBalanceNew += totalLockedAmount;
-                creatorPay += totalLockedAmount;
+
+                if (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) {
+                    creatorPay += currentBet.amountDeployerLocked;
+                } else {
+                    creatorPay += currentBet.amountBuyerLocked;
+                }
+
                 currentBet.amountBuyerLocked = 0;
                 currentBet.amountDeployerLocked = 0;
-            } 
+            }
         }
     }
 
+    // Calculate creator fee and staff pay if applicable
     if (!isWinnerThree && creatorPay > 0) {
-        uint256 creatorFee = (creatorPay * 300) / 10000; 
-        uint256 _staffPay = (creatorPay * 200) / 10000; 
+        uint256 creatorFee = (creatorPay * 300) / 10000; // 3% fee
+        uint256 _staffPay = (creatorPay * 200) / 10000;  // 2% staff pay
+
         staffPay += _staffPay;
         creatorLocked += creatorFee;
         betterBalanceNew -= (creatorFee + _staffPay);
     }
 
+    // Ensure there is a balance to withdraw and the contract has enough funds
     require(betterBalanceNew > 0, "No balance to withdraw");
     require(address(this).balance >= betterBalanceNew, "Insufficient contract balance");
 
+    // Transfer the balance to the user
     payable(msg.sender).transfer(betterBalanceNew);
 
+    // Emit withdrawal event
     emit userWithdrew();
 }
+
+
+function editADeployedBet(
+    uint positionOfArray, 
+    uint newDeployPrice, 
+    uint newAskingPrice
+) 
+    public 
+    payable 
+    nonReentrant 
+{
+    // Ensure only the deployer can edit the bet
+    bet storage currentBet = arrayOfBets[positionOfArray];
+    require(
+        currentBet.owner == msg.sender && 
+        currentBet.deployer == msg.sender, 
+        "Only the deployer who is also the owner can edit this bet"
+    );
+
+    uint currentLockedAmount = currentBet.amountDeployerLocked;
+
+    if (newDeployPrice != currentLockedAmount) {
+        if (newDeployPrice < currentLockedAmount) {
+            // Refund excess funds if new deploy price is less
+            uint refundAmount = currentLockedAmount - newDeployPrice;
+            require(address(this).balance >= refundAmount, "Insufficient contract funds for refund");
+            currentBet.amountDeployerLocked = newDeployPrice;
+            payable(msg.sender).transfer(refundAmount);
+        } else {
+            // Ensure additional funds are sent if new deploy price is more
+            uint additionalAmount = newDeployPrice - currentLockedAmount;
+            require(msg.value == additionalAmount, "Incorrect additional funds sent");
+            currentBet.amountDeployerLocked = newDeployPrice;
+        }
+    }
+
+    // Update the asking price
+    currentBet.amountToBuyFor = newAskingPrice;
+
+    // Ensure the bet is marked as selling if it wasn't already
+    if (!currentBet.selling) {
+        currentBet.selling = true;
+        }
+
+    emit BetEdited();
+}
+
 
 
     function transferOwnerAmount()public onlyOwnerOrStaff nonReentrant{
@@ -419,10 +588,10 @@ function editADeployedBet(
     }
 
     function transferStaffAmount()public onlyStaff nonReentrant{
-        require(((s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting) || disagreeCorrect==2), "Invalid state or time");
+        require(((s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting )|| s_raffleState == RaffleState.SETTLED), "Invalid state or time");
         require(staffPay > 0);
         payable(msg.sender).transfer(staffPay);
-        creatorLocked = 0;
+        staffPay = 0;
     }
 
     
