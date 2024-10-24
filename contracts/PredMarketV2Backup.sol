@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 
-contract predMarket2 is ReentrancyGuard {
+contract predMarket2Backup is ReentrancyGuard {
 
     address public immutable owner;
 

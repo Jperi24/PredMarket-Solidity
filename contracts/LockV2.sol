@@ -259,6 +259,7 @@ contract predMarket2 is ReentrancyGuard {
         if(_winner==3){
             refundSoldBets();
             s_raffleState = RaffleState.SETTLED;
+            winner = 3;
             emit winnerDeclaredVoting();
 
 
@@ -294,9 +295,6 @@ contract predMarket2 is ReentrancyGuard {
         emit userVoted();
 
     }
-
-
-
     function allBets_Balance() 
     public 
     view 
@@ -308,18 +306,41 @@ contract predMarket2 is ReentrancyGuard {
         uint256, 
         uint256
     ) 
-    {
+{
     uint256 betterBalanceNew = 0;
-   
-
-    uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
-
     uint256 creatorPay = 0;
     bool isWinnerThree = winner == 3;
     bool isWinnerZero = winner == 0;
 
-    for (uint256 i = 0; i < userBets.length; i++) {
+    uint256[] storage userBets = betsByUser[msg.sender];
+    uint256 userBetsLength = userBets.length;
+
+    // Use a local mapping-like structure to track processed bets
+    // Since mappings cannot be declared in memory, we'll use a temporary array
+    uint256[] memory uniqueBets = new uint256[](userBetsLength);
+    uint256 uniqueCount = 0;
+
+    for (uint256 i = 0; i < userBetsLength; i++) {
         uint256 betIndex = userBets[i];
+        bool isDuplicate = false;
+
+        // Check if the betIndex has already been processed
+        for (uint256 j = 0; j < uniqueCount; j++) {
+            if (uniqueBets[j] == betIndex) {
+                isDuplicate = true;
+                break;
+            }
+        }
+
+        if (!isDuplicate) {
+            uniqueBets[uniqueCount] = betIndex;
+            uniqueCount++;
+        }
+    }
+
+    // Now process each unique bet
+    for (uint256 i = 0; i < uniqueCount; i++) {
+        uint256 betIndex = uniqueBets[i];
         bet storage currentBet = arrayOfBets[betIndex];
 
         if (!isWinnerZero) {
@@ -332,18 +353,17 @@ contract predMarket2 is ReentrancyGuard {
                 }
             } else {
                 if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
-                    betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+                    betterBalanceNew += currentBet.amountDeployerLocked + currentBet.amountBuyerLocked;
                 } else if (
                     (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
                     (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
                 ) {
                     betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                    if(currentBet.owner == msg.sender){
-                        creatorPay +=currentBet.amountDeployerLocked;
-                    }else{
-                        creatorPay +=currentBet.amountBuyerLocked;
+                    if (currentBet.owner == msg.sender) {
+                        creatorPay += currentBet.amountDeployerLocked;
+                    } else {
+                        creatorPay += currentBet.amountBuyerLocked;
                     }
-                    
                 }
             }
         }
@@ -354,11 +374,7 @@ contract predMarket2 is ReentrancyGuard {
         betterBalanceNew -= creatorFee;
         betterBalanceNew += amountMadeFromSoldBets[msg.sender];
     }
-    
-   
 
-
-    // Ensure that `endTime`, `winner`, `s_raffleState`, and `endOfVoting` are properly defined in your contract
     return (
         arrayOfBets, 
         endTime, 
@@ -368,6 +384,81 @@ contract predMarket2 is ReentrancyGuard {
         betterBalanceNew
     );
 }
+
+
+
+
+//     function allBets_Balance() 
+//     public 
+//     view 
+//     returns (
+//         bet[] memory, 
+//         uint256, 
+//         uint8, 
+//         RaffleState, 
+//         uint256, 
+//         uint256
+//     ) 
+//     {
+//     uint256 betterBalanceNew = 0;
+   
+
+//     uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
+
+//     uint256 creatorPay = 0;
+//     bool isWinnerThree = winner == 3;
+//     bool isWinnerZero = winner == 0;
+
+//     for (uint256 i = 0; i < userBets.length; i++) {
+//         uint256 betIndex = userBets[i];
+//         bet storage currentBet = arrayOfBets[betIndex];
+
+//         if (!isWinnerZero) {
+//             if (isWinnerThree) {
+//                 if (currentBet.owner == msg.sender) {
+//                     betterBalanceNew += currentBet.amountBuyerLocked;
+//                 }
+//                 if (currentBet.deployer == msg.sender) {
+//                     betterBalanceNew += currentBet.amountDeployerLocked;
+//                 }
+//             } else {
+//                 if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+//                     betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+//                 } else if (
+//                     (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+//                     (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+//                 ) {
+//                     betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+//                     if(currentBet.owner == msg.sender){
+//                         creatorPay +=currentBet.amountDeployerLocked;
+//                     }else{
+//                         creatorPay +=currentBet.amountBuyerLocked;
+//                     }
+                    
+//                 }
+//             }
+//         }
+//     }
+
+//     if (!isWinnerThree && creatorPay > 0) {
+//         uint256 creatorFee = (creatorPay * 5) / 100;
+//         betterBalanceNew -= creatorFee;
+//         betterBalanceNew += amountMadeFromSoldBets[msg.sender];
+//     }
+    
+   
+
+
+//     // Ensure that `endTime`, `winner`, `s_raffleState`, and `endOfVoting` are properly defined in your contract
+//     return (
+//         arrayOfBets, 
+//         endTime, 
+//         winner, 
+//         s_raffleState, 
+//         endOfVoting, 
+//         betterBalanceNew
+//     );
+// }
 
 
 
