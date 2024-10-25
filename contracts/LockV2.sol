@@ -67,6 +67,7 @@ contract predMarket2 is ReentrancyGuard {
     event userVoted();
     event userWithdrew();
     event BetEdited();
+  
     
 
     enum RaffleState {
@@ -156,17 +157,19 @@ contract predMarket2 is ReentrancyGuard {
         require(msg.value == arrayOfBets[positionOfArray].amountToBuyFor);
         require(arrayOfBets[positionOfArray].selling == true);
         require(arrayOfBets[positionOfArray].owner != msg.sender, "You already own this bet");
+        address previousOwner = arrayOfBets[positionOfArray].owner;
         if(arrayOfBets[positionOfArray].amountBuyerLocked ==0){
             arrayOfBets[positionOfArray].amountBuyerLocked = msg.value;
         }else{
             soldBetHistory[positionOfArray].push(BetSale({
             buyer: msg.sender,
-            previousOwner:arrayOfBets[positionOfArray].owner,
+            previousOwner:previousOwner,
             amountPaid: msg.value
             }));
-            amountMadeFromSoldBets[arrayOfBets[positionOfArray].owner] += msg.value;
+            amountMadeFromSoldBets[previousOwner] += msg.value;
+            
+            
 
-        
              
         }
         betsByUser[msg.sender].push(positionOfArray);
@@ -369,9 +372,12 @@ contract predMarket2 is ReentrancyGuard {
         }
     }
 
-    if (!isWinnerThree && creatorPay > 0) {
-        uint256 creatorFee = (creatorPay * 5) / 100;
-        betterBalanceNew -= creatorFee;
+    if (!isWinnerThree ) {
+        if(creatorPay > 0){
+            uint256 creatorFee = (creatorPay * 5) / 100;
+            betterBalanceNew -= creatorFee;
+        }
+        
         betterBalanceNew += amountMadeFromSoldBets[msg.sender];
     }
 
@@ -523,13 +529,17 @@ function withdraw() public nonReentrant {
     }
 
     // Calculate creator fee and staff pay if applicable
-    if (!isWinnerThree && creatorPay > 0) {
-        uint256 _staffPay = (creatorPay * 300) / 10000; // 3% fee
-        uint256 creatorFee = (creatorPay * 200) / 10000;  // 2% staff pay
+    if (!isWinnerThree) {
 
-        staffPay += _staffPay;
-        creatorLocked += creatorFee;
-        betterBalanceNew -= (creatorFee + _staffPay);
+        if(creatorPay>0){
+            uint256 _staffPay = (creatorPay * 300) / 10000; // 3% fee
+            uint256 creatorFee = (creatorPay * 200) / 10000;  // 2% staff pay
+
+            staffPay += _staffPay;
+            creatorLocked += creatorFee;
+            betterBalanceNew -= (creatorFee + _staffPay);
+        }
+        
         betterBalanceNew += amountMadeFromSoldBets[msg.sender];
         amountMadeFromSoldBets[msg.sender] = 0;
     }
