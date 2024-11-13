@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 
-contract predMarket2Backup is ReentrancyGuard {
+contract predMarket2 is ReentrancyGuard {
 
     address public immutable owner;
 
@@ -37,6 +37,15 @@ contract predMarket2Backup is ReentrancyGuard {
     uint8 public winner;
     RaffleState public s_raffleState;
     mapping(address => uint256[])public betsByUser;
+    mapping(address=>uint256)public amountMadeFromSoldBets;
+    struct BetSale {
+        address buyer;
+        address previousOwner;
+        uint256 amountPaid;
+    }
+
+    // Mapping to track all sales of a bet
+    mapping(uint256 => BetSale[]) public soldBetHistory;
     
     
 
@@ -50,7 +59,8 @@ contract predMarket2Backup is ReentrancyGuard {
  
    
     
-    event userCreatedABet();
+    event userCreatedABet(uint256 positionInArray);
+
     event BetUnlisted();
     event userBoughtBet();
     event userReListedBet();
@@ -58,6 +68,7 @@ contract predMarket2Backup is ReentrancyGuard {
     event userVoted();
     event userWithdrew();
     event BetEdited();
+  
     
 
     enum RaffleState {
@@ -71,7 +82,7 @@ contract predMarket2Backup is ReentrancyGuard {
     
  
 
-    constructor(uint256 _endTime) payable {
+    constructor(uint256 _endTime)  {
         owner = msg.sender;
         endTime = _endTime;
         s_raffleState = RaffleState.OPEN;
@@ -108,6 +119,7 @@ contract predMarket2Backup is ReentrancyGuard {
         uint8 conditionForBuyerToWin;
         bool selling;
         uint256 positionInArray;
+     
         
     }
 
@@ -117,11 +129,18 @@ contract predMarket2Backup is ReentrancyGuard {
         require(conditionToWIn > 0 && conditionToWIn <= 2);
         require(msg.value>0);
         require(s_raffleState == RaffleState.OPEN);
+        uint256 positionInArray = arrayOfBets.length;
 
-        bet memory newBet = bet(msg.sender,msg.value, msg.sender,0,amountToBuy, conditionToWIn,true,arrayOfBets.length);
-        betsByUser[msg.sender].push(arrayOfBets.length);
+        bet memory newBet = bet(msg.sender,msg.value, msg.sender,0,amountToBuy, conditionToWIn,true,positionInArray);
+        betsByUser[msg.sender].push(positionInArray);
         arrayOfBets.push(newBet);
-        emit userCreatedABet();
+
+        emit userCreatedABet(positionInArray);
+    }
+
+   function changeState(uint8 state) public onlyStaff {
+        require(state <= uint8(RaffleState.SETTLED), "Invalid state value"); // Ensure valid state
+        s_raffleState = RaffleState(state); // Cast uint8 to RaffleState enum
     }
 
     function unlistBets(uint[] memory positionsOfArray) public nonReentrant{
@@ -146,10 +165,20 @@ contract predMarket2Backup is ReentrancyGuard {
         require(s_raffleState == RaffleState.OPEN);
         require(msg.value == arrayOfBets[positionOfArray].amountToBuyFor);
         require(arrayOfBets[positionOfArray].selling == true);
+        require(arrayOfBets[positionOfArray].owner != msg.sender, "You already own this bet");
+        address previousOwner = arrayOfBets[positionOfArray].owner;
         if(arrayOfBets[positionOfArray].amountBuyerLocked ==0){
             arrayOfBets[positionOfArray].amountBuyerLocked = msg.value;
         }else{
-             payable(arrayOfBets[positionOfArray].owner).transfer(msg.value);
+            soldBetHistory[positionOfArray].push(BetSale({
+            buyer: msg.sender,
+            previousOwner:previousOwner,
+            amountPaid: msg.value
+            }));
+            amountMadeFromSoldBets[previousOwner] += msg.value;
+            
+            
+
              
         }
         betsByUser[msg.sender].push(positionOfArray);
@@ -159,6 +188,7 @@ contract predMarket2Backup is ReentrancyGuard {
         emit userBoughtBet();
 
     }
+
     
 
 
@@ -175,12 +205,79 @@ contract predMarket2Backup is ReentrancyGuard {
 
     event PayoutProcessed();
     event FundsRedistributed(address indexed beneficiary, uint amount);
+    // Declare the mapping as a state variable
+    mapping(address => uint256) private tempBalance;
+    address[] private refundAddresses;
+
+    function refundSoldBets() private onlyStaff {
+      
+        delete refundAddresses;
+
+        // Iterate through each bet
+       for (uint256 i = 0; i < arrayOfBets.length; i++) {
+                if (soldBetHistory[i].length > 0) {
+                    // Iterate through the history of sold bets for this bet
+                    for (uint256 j = 0; j < soldBetHistory[i].length; j++) {
+                        address buyer = soldBetHistory[i][j].buyer;
+                        uint256 amountPaid = soldBetHistory[i][j].amountPaid;
+
+                        // Check if the buyer is already in the addresses array
+                        bool alreadyExists = false;
+                        for (uint256 k = 0; k < refundAddresses.length; k++) {
+                            if (refundAddresses[k] == buyer) {
+                                alreadyExists = true;
+                                break;
+                            }
+                        }
+
+                        // Add buyer to addresses array if not already added
+                        if (!alreadyExists) {
+                            refundAddresses.push(buyer);
+                        }
+
+                        // Accumulate the amount paid in tempBalance
+                        tempBalance[buyer] += amountPaid;
+
+                        // If we're at the last entry, set the original owner
+                        if (j == soldBetHistory[i].length - 1) {
+                            arrayOfBets[i].owner = soldBetHistory[i][0].previousOwner;
+                        }
+                    }
+                }
+            }
+
+
+        // Refund all addresses
+        for (uint256 i = 0; i < refundAddresses.length; i++) {
+            address buyer = refundAddresses[i];
+            uint256 balanceToRefund = tempBalance[buyer];
+
+            // Ensure there is a balance to refund
+            if (balanceToRefund > 0) {
+                payable(buyer).transfer(balanceToRefund);
+                tempBalance[buyer] = 0;  // Reset balance after refund
+            }
+        }
+    }
+
+
+ 
+
 
     
     
 
     function declareWinner(uint8 _winner)public onlyStaff nonReentrant{
         require((_winner>0) && (_winner < 4));
+        if(_winner==3){
+            refundSoldBets();
+            s_raffleState = RaffleState.SETTLED;
+            winner = 3;
+            emit winnerDeclaredVoting();
+
+
+        }
+        else{
         if(s_raffleState == RaffleState.OPEN){
             uint256 currentTime = block.timestamp;
             endOfVoting = currentTime + 300;
@@ -199,7 +296,7 @@ contract predMarket2Backup is ReentrancyGuard {
             emit winnerDeclaredVoting();
             s_raffleState = RaffleState.SETTLED;
         }   
-    }
+    }}
 
 
 
@@ -211,9 +308,6 @@ contract predMarket2Backup is ReentrancyGuard {
         emit userVoted();
 
     }
-
-
-
     function allBets_Balance() 
     public 
     view 
@@ -223,23 +317,43 @@ contract predMarket2Backup is ReentrancyGuard {
         uint8, 
         RaffleState, 
         uint256, 
-        uint256, 
-        uint256, 
         uint256
     ) 
-    {
+{
     uint256 betterBalanceNew = 0;
-    uint256 balanceIfWinnerIs1 = 0;
-    uint256 balanceIfWinnerIs2 = 0;
-
-    uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
-
     uint256 creatorPay = 0;
     bool isWinnerThree = winner == 3;
     bool isWinnerZero = winner == 0;
 
-    for (uint256 i = 0; i < userBets.length; i++) {
+    uint256[] storage userBets = betsByUser[msg.sender];
+    uint256 userBetsLength = userBets.length;
+
+    // Use a local mapping-like structure to track processed bets
+    // Since mappings cannot be declared in memory, we'll use a temporary array
+    uint256[] memory uniqueBets = new uint256[](userBetsLength);
+    uint256 uniqueCount = 0;
+
+    for (uint256 i = 0; i < userBetsLength; i++) {
         uint256 betIndex = userBets[i];
+        bool isDuplicate = false;
+
+        // Check if the betIndex has already been processed
+        for (uint256 j = 0; j < uniqueCount; j++) {
+            if (uniqueBets[j] == betIndex) {
+                isDuplicate = true;
+                break;
+            }
+        }
+
+        if (!isDuplicate) {
+            uniqueBets[uniqueCount] = betIndex;
+            uniqueCount++;
+        }
+    }
+
+    // Now process each unique bet
+    for (uint256 i = 0; i < uniqueCount; i++) {
+        uint256 betIndex = uniqueBets[i];
         bet storage currentBet = arrayOfBets[betIndex];
 
         if (!isWinnerZero) {
@@ -252,40 +366,115 @@ contract predMarket2Backup is ReentrancyGuard {
                 }
             } else {
                 if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
-                    betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+                    betterBalanceNew += currentBet.amountDeployerLocked + currentBet.amountBuyerLocked;
                 } else if (
                     (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
                     (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
                 ) {
                     betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-                    if(currentBet.owner == msg.sender){
-                        creatorPay +=currentBet.amountDeployerLocked;
-                    }else{
-                        creatorPay +=currentBet.amountBuyerLocked;
+                    if (currentBet.owner == msg.sender) {
+                        creatorPay += currentBet.amountDeployerLocked;
+                    } else {
+                        creatorPay += currentBet.amountBuyerLocked;
                     }
-                    
                 }
             }
         }
     }
 
-    if (!isWinnerThree && creatorPay > 0) {
-        uint256 creatorFee = (creatorPay * 5) / 100;
-        betterBalanceNew -= creatorFee;
+    if (!isWinnerThree ) {
+        if(creatorPay > 0){
+            uint256 creatorFee = (creatorPay * 5) / 100;
+            betterBalanceNew -= creatorFee;
+        }
+        
+        betterBalanceNew += amountMadeFromSoldBets[msg.sender];
     }
 
-    // Ensure that `endTime`, `winner`, `s_raffleState`, and `endOfVoting` are properly defined in your contract
     return (
         arrayOfBets, 
         endTime, 
         winner, 
         s_raffleState, 
         endOfVoting, 
-        betterBalanceNew, 
-        balanceIfWinnerIs1, 
-        balanceIfWinnerIs2
+        betterBalanceNew
     );
 }
+
+
+
+
+//     function allBets_Balance() 
+//     public 
+//     view 
+//     returns (
+//         bet[] memory, 
+//         uint256, 
+//         uint8, 
+//         RaffleState, 
+//         uint256, 
+//         uint256
+//     ) 
+//     {
+//     uint256 betterBalanceNew = 0;
+   
+
+//     uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
+
+//     uint256 creatorPay = 0;
+//     bool isWinnerThree = winner == 3;
+//     bool isWinnerZero = winner == 0;
+
+//     for (uint256 i = 0; i < userBets.length; i++) {
+//         uint256 betIndex = userBets[i];
+//         bet storage currentBet = arrayOfBets[betIndex];
+
+//         if (!isWinnerZero) {
+//             if (isWinnerThree) {
+//                 if (currentBet.owner == msg.sender) {
+//                     betterBalanceNew += currentBet.amountBuyerLocked;
+//                 }
+//                 if (currentBet.deployer == msg.sender) {
+//                     betterBalanceNew += currentBet.amountDeployerLocked;
+//                 }
+//             } else {
+//                 if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
+//                     betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
+//                 } else if (
+//                     (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
+//                     (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
+//                 ) {
+//                     betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+//                     if(currentBet.owner == msg.sender){
+//                         creatorPay +=currentBet.amountDeployerLocked;
+//                     }else{
+//                         creatorPay +=currentBet.amountBuyerLocked;
+//                     }
+                    
+//                 }
+//             }
+//         }
+//     }
+
+//     if (!isWinnerThree && creatorPay > 0) {
+//         uint256 creatorFee = (creatorPay * 5) / 100;
+//         betterBalanceNew -= creatorFee;
+//         betterBalanceNew += amountMadeFromSoldBets[msg.sender];
+//     }
+    
+   
+
+
+//     // Ensure that `endTime`, `winner`, `s_raffleState`, and `endOfVoting` are properly defined in your contract
+//     return (
+//         arrayOfBets, 
+//         endTime, 
+//         winner, 
+//         s_raffleState, 
+//         endOfVoting, 
+//         betterBalanceNew
+//     );
+// }
 
 
 
@@ -350,13 +539,19 @@ function withdraw() public nonReentrant {
     }
 
     // Calculate creator fee and staff pay if applicable
-    if (!isWinnerThree && creatorPay > 0) {
-        uint256 _staffPay = (creatorPay * 300) / 10000; // 3% fee
-        uint256 creatorFee = (creatorPay * 200) / 10000;  // 2% staff pay
+    if (!isWinnerThree) {
 
-        staffPay += _staffPay;
-        creatorLocked += creatorFee;
-        betterBalanceNew -= (creatorFee + _staffPay);
+        if(creatorPay>0){
+            uint256 _staffPay = (creatorPay * 300) / 10000; // 3% fee
+            uint256 creatorFee = (creatorPay * 200) / 10000;  // 2% staff pay
+
+            staffPay += _staffPay;
+            creatorLocked += creatorFee;
+            betterBalanceNew -= (creatorFee + _staffPay);
+        }
+        
+        betterBalanceNew += amountMadeFromSoldBets[msg.sender];
+        amountMadeFromSoldBets[msg.sender] = 0;
     }
 
     // Ensure there is a balance to withdraw and the contract has enough funds
@@ -369,6 +564,10 @@ function withdraw() public nonReentrant {
     // Emit withdrawal event
     emit userWithdrew();
 }
+
+
+
+
 
 
 function editADeployedBet(
