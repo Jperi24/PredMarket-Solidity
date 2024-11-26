@@ -68,6 +68,7 @@ contract predMarket2 is ReentrancyGuard {
     event userVoted();
     event userWithdrew();
     event BetEdited();
+    event BetCancelled();
   
     
 
@@ -119,7 +120,7 @@ contract predMarket2 is ReentrancyGuard {
         uint8 conditionForBuyerToWin;
         bool selling;
         uint256 positionInArray;
-     
+        bool isActive;
         
     }
 
@@ -129,9 +130,10 @@ contract predMarket2 is ReentrancyGuard {
         require(conditionToWIn > 0 && conditionToWIn <= 2);
         require(msg.value>0);
         require(s_raffleState == RaffleState.OPEN);
+        require(arrayOfBets.length < 300,"Max Bets Reached");
         uint256 positionInArray = arrayOfBets.length;
 
-        bet memory newBet = bet(msg.sender,msg.value, msg.sender,0,amountToBuy, conditionToWIn,true,positionInArray);
+        bet memory newBet = bet(msg.sender,msg.value, msg.sender,0,amountToBuy, conditionToWIn,true,positionInArray,true);
         betsByUser[msg.sender].push(positionInArray);
         arrayOfBets.push(newBet);
 
@@ -145,15 +147,21 @@ contract predMarket2 is ReentrancyGuard {
 
     function unlistBets(uint[] memory positionsOfArray) public nonReentrant{
         // Loop through each position provided in the array
-        for (uint i = 0; i < positionsOfArray.length; i++) {
+        require(positionsOfArray.length<=betsByUser[msg.sender].length + 5);
+        for (uint i = 0; i < positionsOfArray.length;) {
             uint position = positionsOfArray[i];
             // Check if the sender is the owner of the bet
             require(arrayOfBets[position].owner == msg.sender, "Caller is not the owner");
             // Check if the bet is currently marked as selling
             require(arrayOfBets[position].selling == true, "Bet is not for sale");
+            require(arrayOfBets[position].isActive);
+            require(position<arrayOfBets.length,"Invalid Position");
+
             // Mark the bet as not selling
             arrayOfBets[position].selling = false;
             // Emit an event for the unlisted bet
+
+            unchecked { ++i; }
             
         }
         emit BetUnlisted();
@@ -163,6 +171,7 @@ contract predMarket2 is ReentrancyGuard {
 
     function buyABet(uint positionOfArray) public payable nonReentrant{
         require(s_raffleState == RaffleState.OPEN);
+        require(arrayOfBets[positionOfArray].isActive);
         require(msg.value == arrayOfBets[positionOfArray].amountToBuyFor);
         require(arrayOfBets[positionOfArray].selling == true);
         require(arrayOfBets[positionOfArray].owner != msg.sender, "You already own this bet");
@@ -196,6 +205,7 @@ contract predMarket2 is ReentrancyGuard {
     function sellAnExistingBet(uint positionOfArray, uint newAskingPrice)public nonReentrant{
         require(s_raffleState == RaffleState.OPEN);
         require(arrayOfBets[positionOfArray].owner == msg.sender);
+        require(arrayOfBets[positionOfArray].isActive);
         arrayOfBets[positionOfArray].amountToBuyFor = newAskingPrice;
         arrayOfBets[positionOfArray].selling = true;
         emit userReListedBet();
@@ -308,7 +318,8 @@ contract predMarket2 is ReentrancyGuard {
         emit userVoted();
 
     }
-    function allBets_Balance() 
+
+function allBets_Balance() 
     public 
     view 
     returns (
@@ -322,14 +333,45 @@ contract predMarket2 is ReentrancyGuard {
 {
     uint256 betterBalanceNew = 0;
     uint256 creatorPay = 0;
+
     bool isWinnerThree = winner == 3;
     bool isWinnerZero = winner == 0;
 
     uint256[] storage userBets = betsByUser[msg.sender];
     uint256 userBetsLength = userBets.length;
 
-    // Use a local mapping-like structure to track processed bets
-    // Since mappings cannot be declared in memory, we'll use a temporary array
+    // Process unique bets
+    uint256[] memory uniqueBets = getUniqueBets(userBets, userBetsLength);
+
+    // Calculate betterBalanceNew and creatorPay
+    (betterBalanceNew, creatorPay) = calculateBetBalanceAndCreatorPay(uniqueBets, isWinnerThree, isWinnerZero, betterBalanceNew, creatorPay);
+
+    if (!isWinnerThree ) {
+        if(creatorPay > 0){
+            uint256 creatorFee = (creatorPay * 5) / 100;
+            betterBalanceNew -= creatorFee;
+        }
+        betterBalanceNew += amountMadeFromSoldBets[msg.sender];
+    }
+
+    // Count active bets
+    uint256 activeBetsCount = countActiveBets();
+
+    // Create the memory array for active bets
+    bet[] memory activeBets = getActiveBets(activeBetsCount);
+
+    return (
+        activeBets, 
+        endTime, 
+        winner, 
+        s_raffleState, 
+        endOfVoting, 
+        betterBalanceNew
+    );
+}
+
+// Helper function to get unique bets
+function getUniqueBets(uint256[] storage userBets, uint256 userBetsLength) internal view returns (uint256[] memory) {
     uint256[] memory uniqueBets = new uint256[](userBetsLength);
     uint256 uniqueCount = 0;
 
@@ -350,9 +392,18 @@ contract predMarket2 is ReentrancyGuard {
             uniqueCount++;
         }
     }
+    return uniqueBets;
+}
 
-    // Now process each unique bet
-    for (uint256 i = 0; i < uniqueCount; i++) {
+// Helper function to calculate betterBalanceNew and creatorPay
+function calculateBetBalanceAndCreatorPay(
+    uint256[] memory uniqueBets, 
+    bool isWinnerThree, 
+    bool isWinnerZero, 
+    uint256 betterBalanceNew, 
+    uint256 creatorPay
+) internal view returns (uint256, uint256) {
+    for (uint256 i = 0; i < uniqueBets.length; i++) {
         uint256 betIndex = uniqueBets[i];
         bet storage currentBet = arrayOfBets[betIndex];
 
@@ -381,100 +432,36 @@ contract predMarket2 is ReentrancyGuard {
             }
         }
     }
+    return (betterBalanceNew, creatorPay);
+}
 
-    if (!isWinnerThree ) {
-        if(creatorPay > 0){
-            uint256 creatorFee = (creatorPay * 5) / 100;
-            betterBalanceNew -= creatorFee;
-        }
-        
-        betterBalanceNew += amountMadeFromSoldBets[msg.sender];
+// Helper function to count active bets
+function countActiveBets() internal view returns (uint256) {
+    uint256 activeBetsCount = 0;
+
+    for (uint256 i = 0; i < arrayOfBets.length; i++) {
+        if (arrayOfBets[i].isActive) {
+            activeBetsCount++;
+        } 
     }
+    return activeBetsCount;
+}
 
-    return (
-        arrayOfBets, 
-        endTime, 
-        winner, 
-        s_raffleState, 
-        endOfVoting, 
-        betterBalanceNew
-    );
+// Helper function to get active bets
+function getActiveBets(uint256 activeBetsCount) internal view returns (bet[] memory) {
+    bet[] memory activeBets = new bet[](activeBetsCount);
+    uint256 activeIndex = 0;
+
+    for (uint256 i = 0; i < arrayOfBets.length; i++) {
+        if (arrayOfBets[i].isActive) {
+            activeBets[activeIndex] = arrayOfBets[i];
+            activeIndex++;
+        }
+    }
+    return activeBets;
 }
 
 
-
-
-//     function allBets_Balance() 
-//     public 
-//     view 
-//     returns (
-//         bet[] memory, 
-//         uint256, 
-//         uint8, 
-//         RaffleState, 
-//         uint256, 
-//         uint256
-//     ) 
-//     {
-//     uint256 betterBalanceNew = 0;
-   
-
-//     uint256[] storage userBets = betsByUser[msg.sender]; // Direct access to save on gas
-
-//     uint256 creatorPay = 0;
-//     bool isWinnerThree = winner == 3;
-//     bool isWinnerZero = winner == 0;
-
-//     for (uint256 i = 0; i < userBets.length; i++) {
-//         uint256 betIndex = userBets[i];
-//         bet storage currentBet = arrayOfBets[betIndex];
-
-//         if (!isWinnerZero) {
-//             if (isWinnerThree) {
-//                 if (currentBet.owner == msg.sender) {
-//                     betterBalanceNew += currentBet.amountBuyerLocked;
-//                 }
-//                 if (currentBet.deployer == msg.sender) {
-//                     betterBalanceNew += currentBet.amountDeployerLocked;
-//                 }
-//             } else {
-//                 if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
-//                     betterBalanceNew += (currentBet.amountDeployerLocked + currentBet.amountBuyerLocked);
-//                 } else if (
-//                     (currentBet.owner == msg.sender && currentBet.conditionForBuyerToWin == winner) ||
-//                     (currentBet.deployer == msg.sender && currentBet.conditionForBuyerToWin != winner)
-//                 ) {
-//                     betterBalanceNew += currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
-//                     if(currentBet.owner == msg.sender){
-//                         creatorPay +=currentBet.amountDeployerLocked;
-//                     }else{
-//                         creatorPay +=currentBet.amountBuyerLocked;
-//                     }
-                    
-//                 }
-//             }
-//         }
-//     }
-
-//     if (!isWinnerThree && creatorPay > 0) {
-//         uint256 creatorFee = (creatorPay * 5) / 100;
-//         betterBalanceNew -= creatorFee;
-//         betterBalanceNew += amountMadeFromSoldBets[msg.sender];
-//     }
-    
-   
-
-
-//     // Ensure that `endTime`, `winner`, `s_raffleState`, and `endOfVoting` are properly defined in your contract
-//     return (
-//         arrayOfBets, 
-//         endTime, 
-//         winner, 
-//         s_raffleState, 
-//         endOfVoting, 
-//         betterBalanceNew
-//     );
-// }
 
 
 
@@ -567,6 +554,38 @@ function withdraw() public nonReentrant {
 
 
 
+function cancelOwnedBet(uint positionOfArray) public nonReentrant {
+    bet storage currentBet = arrayOfBets[positionOfArray];
+    
+    require(
+        currentBet.owner == msg.sender && 
+        currentBet.deployer == msg.sender, 
+        "Only the deployer who is also the owner can edit this bet"
+    );
+    
+    uint refund;
+    if (currentBet.amountBuyerLocked > 0) {
+        refund = currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
+    } else {
+        refund = currentBet.amountDeployerLocked;
+    }
+    
+    // Transfer the refund amount to the bet owner
+    payable(msg.sender).transfer(refund);
+    
+    // Reset the bet's owner and deployer to the zero address
+    currentBet.owner = address(0);
+    currentBet.deployer = address(0);
+
+    // Set locked amounts to zero
+    currentBet.amountBuyerLocked = 0;
+    currentBet.amountDeployerLocked = 0;
+
+    // Mark the bet as inactive
+    currentBet.isActive = false;
+    emit BetCancelled();
+}
+
 
 
 
@@ -586,6 +605,7 @@ function editADeployedBet(
         currentBet.deployer == msg.sender, 
         "Only the deployer who is also the owner can edit this bet"
     );
+    require(arrayOfBets[positionOfArray].isActive);
 
     uint currentLockedAmount = currentBet.amountDeployerLocked;
 
