@@ -14,7 +14,7 @@ contract predMarket2 is ReentrancyGuard {
 
 
    
-   uint256 public staffPay;
+   uint96 public staffPay;
 
     modifier onlyStaff() {
         bool isStaff = false;
@@ -32,24 +32,24 @@ contract predMarket2 is ReentrancyGuard {
    
 
     uint256 public endOfVoting;
-    uint256 public creatorLocked;
+    uint96 public creatorLocked;
     uint256 endTime;
     uint8 public winner;
     RaffleState public s_raffleState;
-    mapping(address => uint256[])public betsByUser;
-    mapping(address=>uint256)public amountMadeFromSoldBets;
+    mapping(address => uint32[])public betsByUser;
+    mapping(address=>uint96)public amountMadeFromSoldBets;
     struct BetSale {
         address buyer;
         address previousOwner;
-        uint256 amountPaid;
+        uint96 amountPaid;
     }
 
     // Mapping to track all sales of a bet
-    mapping(uint256 => BetSale[]) public soldBetHistory;
+    mapping(uint32 => BetSale[]) public soldBetHistory;
     event PayoutProcessed();
     event FundsRedistributed(address indexed beneficiary, uint amount);
     // Declare the mapping as a state variable
-    mapping(address => uint256) private tempBalance;
+    mapping(address => uint96) private tempBalance;
     address[] private refundAddresses;
     
     
@@ -66,16 +66,16 @@ contract predMarket2 is ReentrancyGuard {
  
    
     
-    event userCreatedABet(uint256 positionInArray);
+    event userCreatedABet(uint32 positionInArray);
 
-    event BetUnlisted();
-    event userBoughtBet();
-    event userReListedBet();
-    event winnerDeclaredVoting();
-    event userVoted();
-    event userWithdrew();
-    event BetEdited();
-    event BetCancelled();
+event BetUnlisted();
+event userBoughtBet(uint32 position, address buyer, uint96 amount);
+event userReListedBet();
+event winnerDeclaredVoting();
+event userVoted();
+event userWithdrew(address user, uint96 amount);
+event BetEdited();
+event BetCancelled();
   
     
 
@@ -90,13 +90,13 @@ contract predMarket2 is ReentrancyGuard {
     
  
 
-    constructor(uint256 _endTime)  {
-        owner = msg.sender;
-        endTime = _endTime;
-        s_raffleState = RaffleState.OPEN;
-
-
-    }
+  constructor(uint256 _endTime) {
+    require(msg.sender != address(0), "Invalid owner address");
+    require(_endTime > block.timestamp, "Invalid end time");
+    owner = msg.sender;
+    endTime = _endTime;
+    s_raffleState = RaffleState.OPEN;
+}
 
     modifier onlyOwnerOrStaff() {
         bool isStaff = false;
@@ -132,7 +132,7 @@ struct bet {
 
     bet[] public arrayOfBets;
 
-function sellANewBet(uint256 amountToBuy, uint8 conditionToWIn) 
+function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn) 
     public 
     payable 
     nonReentrant  
@@ -160,7 +160,7 @@ function sellANewBet(uint256 amountToBuy, uint8 conditionToWIn)
         amountDeployerLocked: uint96(msg.value),
         owner: msg.sender,
         amountBuyerLocked: 0,
-        amountToBuyFor: uint96(amountToBuy),
+        amountToBuyFor: amountToBuy,
         conditionForBuyerToWin: conditionToWIn,
         selling: true,
         positionInArray: positionInArray,
@@ -174,11 +174,11 @@ function sellANewBet(uint256 amountToBuy, uint8 conditionToWIn)
         s_raffleState = RaffleState(state); // Cast uint8 to RaffleState enum
     }
 
-    function unlistBets(uint[] memory positionsOfArray) public nonReentrant{
+    function unlistBets(uint32[] memory positionsOfArray) public nonReentrant{
         // Loop through each position provided in the array
         require(positionsOfArray.length<=betsByUser[msg.sender].length + 5);
-        for (uint i = 0; i < positionsOfArray.length;) {
-            uint position = positionsOfArray[i];
+        for (uint32 i = 0; i < positionsOfArray.length;) {
+            uint32 position = positionsOfArray[i];
             // Check if the sender is the owner of the bet
             require(arrayOfBets[position].owner == msg.sender, "Caller is not the owner");
             // Check if the bet is currently marked as selling
@@ -198,16 +198,17 @@ function sellANewBet(uint256 amountToBuy, uint8 conditionToWIn)
 
  
 
-function buyABet(uint256 positionOfArray) public payable nonReentrant {
+function buyABet(uint32 positionOfArray) public payable nonReentrant {
     require(s_raffleState == RaffleState.OPEN);
     bet storage currentBet = arrayOfBets[positionOfArray];
     
     require(
         currentBet.isActive &&
-        msg.value == currentBet.amountToBuyFor &&
+        uint96(msg.value) == currentBet.amountToBuyFor &&
         msg.value <= type(uint96).max &&
         currentBet.selling &&
-        currentBet.owner != msg.sender
+        currentBet.owner != msg.sender &&
+        positionOfArray < arrayOfBets.length
     );
 
     address previousOwner = currentBet.owner;
@@ -216,12 +217,12 @@ function buyABet(uint256 positionOfArray) public payable nonReentrant {
         currentBet.amountBuyerLocked = uint96(msg.value);  // Explicit cast to uint96
     } else {
         unchecked {
-            amountMadeFromSoldBets[previousOwner] += msg.value;  // This can stay uint256
+            amountMadeFromSoldBets[previousOwner] += uint96(msg.value);  // This can stay uint256
         }
         soldBetHistory[positionOfArray].push(BetSale({
             buyer: msg.sender,
             previousOwner: previousOwner,
-            amountPaid: msg.value  // This can stay uint256 as it's part of BetSale struct
+            amountPaid: uint96(msg.value)  // This can stay uint256 as it's part of BetSale struct
         }));
     }
 
@@ -229,14 +230,14 @@ function buyABet(uint256 positionOfArray) public payable nonReentrant {
     currentBet.owner = msg.sender;
     currentBet.selling = false;
     
-    emit userBoughtBet();
+    emit userBoughtBet(positionOfArray, msg.sender, uint96(msg.value));
 }
 
 
     
 
 
-function sellAnExistingBet(uint256 positionOfArray, uint96 newAskingPrice) public nonReentrant {
+function sellAnExistingBet(uint32 positionOfArray, uint96 newAskingPrice) public nonReentrant {
     require(s_raffleState == RaffleState.OPEN);
     bet storage currentBet = arrayOfBets[positionOfArray];
     
@@ -258,8 +259,8 @@ function refundSoldBets() private {
     // Clear previous refund data
     delete refundAddresses;
     
-    uint256 betsLength = arrayOfBets.length;
-    for (uint256 i; i < betsLength;) {
+    uint32 betsLength = uint32(arrayOfBets.length);
+    for (uint32 i; i < betsLength;) {
         BetSale[] storage salesHistory = soldBetHistory[i];
         uint256 salesLength = salesHistory.length;
         
@@ -292,7 +293,7 @@ function refundSoldBets() private {
     uint256 refundLength = refundAddresses.length;
     for (uint256 i; i < refundLength;) {
         address payable buyer = payable(refundAddresses[i]);
-        uint256 refundAmount = tempBalance[buyer];
+        uint96 refundAmount = tempBalance[buyer];
         
         if (refundAmount > 0) {
             tempBalance[buyer] = 0;  // Reset before transfer to prevent reentrancy
@@ -370,18 +371,18 @@ function allBets_Balance() public view returns (
     uint8 winnerValue, 
     RaffleState state, 
     uint256 votingEnd, 
-    uint256 balance
+    uint96 balance
 ) {
-    uint256[] storage userBets = betsByUser[msg.sender];
+    uint32[] storage userBets = betsByUser[msg.sender];
     uint256 userBetsLength = userBets.length;
     
     // Get unique bets and calculate balances
-    (uint256 betterBalanceNew, uint256 creatorPay) = _calculateBalances(userBets, userBetsLength);
+    (uint96 betterBalanceNew, uint96 creatorPay) = _calculateBalances(userBets, userBetsLength);
 
     // Apply fees and add sold bets balance if not winner three
     if (winner != 3 && creatorPay > 0) {
         unchecked {
-            uint256 creatorFee = (creatorPay * 5) / 100;
+            uint96 creatorFee = (creatorPay * 5) / 100;
             betterBalanceNew = betterBalanceNew - creatorFee + amountMadeFromSoldBets[msg.sender];
         }
     }
@@ -399,13 +400,13 @@ function allBets_Balance() public view returns (
     );
 }
 
-function _calculateBalances(uint256[] storage userBets, uint256 length) private view returns (uint256 balance, uint256 creatorPay) {
+function _calculateBalances(uint32[] storage userBets, uint256 length) private view returns (uint96 balance, uint96 creatorPay) {
     // Use a fixed-size array instead of mapping for processed bets
     uint256[] memory processed = new uint256[](length);
     uint256 processedCount;
     
     for (uint256 i; i < length;) {
-        uint256 betIndex = userBets[i];
+        uint256 betIndex = uint256(userBets[i]);
         bool isDuplicate = false;
         
         // Check if bet was already processed
@@ -422,7 +423,7 @@ function _calculateBalances(uint256[] storage userBets, uint256 length) private 
             unchecked { ++processedCount; }
             
             bet storage currentBet = arrayOfBets[betIndex];
-            (uint256 betBalance, uint256 betCreatorPay) = _calculateSingleBetBalance(currentBet);
+            (uint96 betBalance, uint96 betCreatorPay) = _calculateSingleBetBalance(currentBet);
             
             unchecked {
                 balance += betBalance;
@@ -434,7 +435,7 @@ function _calculateBalances(uint256[] storage userBets, uint256 length) private 
     }
 }
 // New helper for single bet balance calculation
-function _calculateSingleBetBalance(bet storage currentBet) private view returns (uint256 balance, uint256 creatorPay) {
+function _calculateSingleBetBalance(bet storage currentBet) private view returns (uint96 balance, uint96 creatorPay) {
     if (winner == 0) return (0, 0);
     
     if (winner == 3) {
@@ -497,15 +498,15 @@ function _getActiveBets() private view returns (bet[] memory) {
         (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting)
     );
 
-    uint256[] storage userBets = betsByUser[msg.sender];
+    uint32[] storage userBets = betsByUser[msg.sender];
     require(userBets.length > 0);
 
-    uint256 betterBalanceNew;
-    uint256 creatorPay;
+    uint96 betterBalanceNew;
+    uint96 creatorPay;
     bool isWinnerThree = winner == 3;
 
-    uint256 length = userBets.length;
-    for (uint256 i; i < length;) {
+    uint32 length = uint32(userBets.length);
+    for (uint32 i; i < length;) {
         bet storage currentBet = arrayOfBets[userBets[i]];
         
         if (isWinnerThree) {
@@ -522,7 +523,7 @@ function _getActiveBets() private view returns (bet[] memory) {
                 currentBet.amountDeployerLocked = 0;
             }
         } else {
-            (uint256 balance, uint256 creator) = _calculateWinnings(currentBet);
+            (uint96 balance, uint96 creator) = _calculateWinnings(currentBet);
             unchecked {
                 betterBalanceNew += balance;
                 creatorPay += creator;
@@ -534,14 +535,16 @@ function _getActiveBets() private view returns (bet[] memory) {
 
     if (!isWinnerThree && creatorPay > 0) {
         unchecked {
-            uint256 fees = (creatorPay * 500) / 10000; // Combined 5% fee
+            
+            uint96 fees = (creatorPay * 500) / 10000; // Combined 5% fee
+            require(betterBalanceNew >= fees, "Insufficient balance for fees");
             betterBalanceNew -= fees;
             staffPay += (fees * 3) / 5;    // 3% to staff
             creatorLocked += (fees * 2) / 5; // 2% to creator
         }
     }
 
-    uint256 soldBetsBalance = amountMadeFromSoldBets[msg.sender];
+    uint96 soldBetsBalance = amountMadeFromSoldBets[msg.sender];
     if (soldBetsBalance > 0) {
         unchecked {
             betterBalanceNew += soldBetsBalance;
@@ -555,10 +558,10 @@ function _getActiveBets() private view returns (bet[] memory) {
     (bool success, ) = payable(msg.sender).call{value: betterBalanceNew}("");
     require(success, "Transfer failed");
 
-    emit userWithdrew();
+    emit userWithdrew(msg.sender, betterBalanceNew);
 }
 
-function _calculateWinnings(bet storage currentBet) private  returns (uint256 balance, uint256 creator) {
+function _calculateWinnings(bet storage currentBet) private  returns (uint96 balance, uint96 creator) {
     if (currentBet.deployer == msg.sender && currentBet.owner == msg.sender) {
         balance = currentBet.amountDeployerLocked + currentBet.amountBuyerLocked;
         currentBet.amountDeployerLocked = 0;
@@ -576,7 +579,7 @@ function _calculateWinnings(bet storage currentBet) private  returns (uint256 ba
 
 
 
-function cancelOwnedBet(uint256 positionOfArray) public nonReentrant {
+function cancelOwnedBet(uint32 positionOfArray) public nonReentrant {
     bet storage currentBet = arrayOfBets[positionOfArray];
     
     require(
@@ -586,7 +589,7 @@ function cancelOwnedBet(uint256 positionOfArray) public nonReentrant {
         "Not authorized or bet inactive"
     );
     
-    uint256 refundAmount;
+    uint96 refundAmount;
     unchecked {
         refundAmount = currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
     }
@@ -609,10 +612,11 @@ function cancelOwnedBet(uint256 positionOfArray) public nonReentrant {
 
 
 function editADeployedBet(
-    uint256 positionOfArray, 
+    uint32 positionOfArray, 
     uint96 newDeployPrice, 
     uint96 newAskingPrice
 ) public payable nonReentrant {
+    require(positionOfArray < arrayOfBets.length, "Invalid position");
     bet storage currentBet = arrayOfBets[positionOfArray];
     
     require(
@@ -620,7 +624,8 @@ function editADeployedBet(
         currentBet.deployer == msg.sender && 
         newDeployPrice >=0 &&
         newAskingPrice >=0 &&
-        currentBet.isActive,
+        currentBet.isActive &&
+        s_raffleState == RaffleState.OPEN,
         "Not authorized or bet inactive"
     );
     
@@ -660,7 +665,7 @@ function transferOwnerAmount() public onlyOwnerOrStaff nonReentrant {
     );
     require(creatorLocked > 0);
     
-    uint256 amount = creatorLocked;
+    uint96 amount = creatorLocked;
     creatorLocked = 0; // Reset before transfer to prevent reentrancy
     
     (bool success, ) = payable(owner).call{value: amount}("");
@@ -675,7 +680,7 @@ function transferStaffAmount() public onlyStaff nonReentrant {
     );
     require(staffPay > 0);
     
-    uint256 amount = staffPay;
+    uint96 amount = staffPay;
     staffPay = 0; // Reset before transfer to prevent reentrancy
     
     (bool success, ) = payable(msg.sender).call{value: amount}("");
