@@ -66,7 +66,7 @@ contract predMarket2 is ReentrancyGuard {
  
    
     
-    event userCreatedABet(uint32 positionInArray);
+event userCreatedABet(uint32 positionInArray);
 
 event BetUnlisted();
 event userBoughtBet(uint32 position, address buyer, uint96 amount);
@@ -166,6 +166,7 @@ function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn)
         positionInArray: positionInArray,
         isActive: true
     }));
+    emit userCreatedABet(positionInArray);
 
 }
 
@@ -277,14 +278,11 @@ function refundSoldBets() private {
                 if (tempBalance[buyer] > 0 && !_addressExists(buyer)) {
                     refundAddresses.push(buyer);
                 }
-                
-                // Set original owner if last entry
-                if (j == salesLength - 1) {
-                    arrayOfBets[i].owner = salesHistory[0].previousOwner;
-                }
+             
                 
                 unchecked { ++j; }
             }
+            arrayOfBets[i].owner = salesHistory[0].previousOwner;
         }
         unchecked { ++i; }
     }
@@ -380,7 +378,7 @@ function allBets_Balance() public view returns (
     (uint96 betterBalanceNew, uint96 creatorPay) = _calculateBalances(userBets, userBetsLength);
 
     // Apply fees and add sold bets balance if not winner three
-    if (winner != 3 && creatorPay > 0) {
+    if (winner != 3) {
         unchecked {
             uint96 creatorFee = (creatorPay * 5) / 100;
             betterBalanceNew = betterBalanceNew - creatorFee + amountMadeFromSoldBets[msg.sender];
@@ -533,7 +531,7 @@ function _getActiveBets() private view returns (bet[] memory) {
         unchecked { ++i; }
     }
 
-    if (!isWinnerThree && creatorPay > 0) {
+    if (!isWinnerThree) {
         unchecked {
             
             uint96 fees = (creatorPay * 500) / 10000; // Combined 5% fee
@@ -552,7 +550,7 @@ function _getActiveBets() private view returns (bet[] memory) {
         amountMadeFromSoldBets[msg.sender] = 0;
     }
 
-    require(betterBalanceNew > 0 && address(this).balance >= betterBalanceNew);
+    require(betterBalanceNew > 0 && address(this).balance >= betterBalanceNew,"Not enough Shmeckles in Contract");
     
     // Transfer balance
     (bool success, ) = payable(msg.sender).call{value: betterBalanceNew}("");
