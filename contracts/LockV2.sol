@@ -143,6 +143,7 @@ function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn)
         conditionToWIn <= 2 &&
         s_raffleState == RaffleState.OPEN &&
         arrayOfBets.length < 300 &&
+        amountToBuy > 0 &&
         betsByUser[msg.sender].length < 50
     );
     
@@ -240,11 +241,14 @@ function buyABet(uint32 positionOfArray) public payable nonReentrant {
 
 function sellAnExistingBet(uint32 positionOfArray, uint96 newAskingPrice) public nonReentrant {
     require(s_raffleState == RaffleState.OPEN);
+    require(positionOfArray < arrayOfBets.length);
     bet storage currentBet = arrayOfBets[positionOfArray];
     
     require(
         currentBet.owner == msg.sender &&
-        currentBet.isActive
+        currentBet.isActive &&
+        newAskingPrice > 0 
+
     );
     
     currentBet.amountToBuyFor = newAskingPrice;
@@ -295,8 +299,11 @@ function refundSoldBets() private {
         
         if (refundAmount > 0) {
             tempBalance[buyer] = 0;  // Reset before transfer to prevent reentrancy
-            (bool success, ) = buyer.call{value: refundAmount}("");
-            require(success, "Refund failed");
+            // (bool success, ) = buyer.call{value: refundAmount}("");
+            // require(success, "Refund failed");
+            amountMadeFromSoldBets[buyer] = 0;
+            amountMadeFromSoldBets[buyer] += refundAmount;
+
         }
         
         unchecked { ++i; }
@@ -383,6 +390,8 @@ function allBets_Balance() public view returns (
             uint96 creatorFee = (creatorPay * 5) / 100;
             betterBalanceNew = betterBalanceNew - creatorFee + amountMadeFromSoldBets[msg.sender];
         }
+    }else if(winner == 3){
+        betterBalanceNew = betterBalanceNew + amountMadeFromSoldBets[msg.sender];
     }
 
     // Get active bets efficiently
@@ -540,6 +549,8 @@ function _getActiveBets() private view returns (bet[] memory) {
             staffPay += (fees * 3) / 5;    // 3% to staff
             creatorLocked += (fees * 2) / 5; // 2% to creator
         }
+    }else if(isWinnerThree){
+        betterBalanceNew = betterBalanceNew + amountMadeFromSoldBets[msg.sender];
     }
 
     uint96 soldBetsBalance = amountMadeFromSoldBets[msg.sender];
@@ -578,6 +589,7 @@ function _calculateWinnings(bet storage currentBet) private  returns (uint96 bal
 
 
 function cancelOwnedBet(uint32 positionOfArray) public nonReentrant {
+    require(positionOfArray<arrayOfBets.length);
     bet storage currentBet = arrayOfBets[positionOfArray];
     
     require(
