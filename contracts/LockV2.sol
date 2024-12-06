@@ -287,6 +287,11 @@ function refundSoldBets() private {
                 unchecked { ++j; }
             }
             arrayOfBets[i].owner = salesHistory[0].previousOwner;
+        
+
+            // amountMadeFromSoldBets[salesHistory[0].previousOwner] = 0
+
+
         }
         unchecked { ++i; }
     }
@@ -299,10 +304,10 @@ function refundSoldBets() private {
         
         if (refundAmount > 0) {
             tempBalance[buyer] = 0;  // Reset before transfer to prevent reentrancy
-            // (bool success, ) = buyer.call{value: refundAmount}("");
-            // require(success, "Refund failed");
-            amountMadeFromSoldBets[buyer] = 0;
-            amountMadeFromSoldBets[buyer] += refundAmount;
+            (bool success, ) = buyer.call{value: refundAmount}("");
+            require(success, "Refund failed");
+            // amountMadeFromSoldBets[buyer] = 0;
+            // amountMadeFromSoldBets[buyer] += refundAmount;
 
         }
         
@@ -391,7 +396,8 @@ function allBets_Balance() public view returns (
             betterBalanceNew = betterBalanceNew - creatorFee + amountMadeFromSoldBets[msg.sender];
         }
     }else if(winner == 3){
-        betterBalanceNew = betterBalanceNew + amountMadeFromSoldBets[msg.sender];
+        // betterBalanceNew = betterBalanceNew + amountMadeFromSoldBets[msg.sender];
+         betterBalanceNew = betterBalanceNew;
     }
 
     // Get active bets efficiently
@@ -549,14 +555,12 @@ function _getActiveBets() private view returns (bet[] memory) {
             staffPay += (fees * 3) / 5;    // 3% to staff
             creatorLocked += (fees * 2) / 5; // 2% to creator
         }
-    }else if(isWinnerThree){
-        betterBalanceNew = betterBalanceNew + amountMadeFromSoldBets[msg.sender];
     }
 
-    uint96 soldBetsBalance = amountMadeFromSoldBets[msg.sender];
-    if (soldBetsBalance > 0) {
+  
+    if (amountMadeFromSoldBets[msg.sender] > 0 && !isWinnerThree ) {
         unchecked {
-            betterBalanceNew += soldBetsBalance;
+            betterBalanceNew += amountMadeFromSoldBets[msg.sender];
         }
         amountMadeFromSoldBets[msg.sender] = 0;
     }
@@ -599,6 +603,7 @@ function cancelOwnedBet(uint32 positionOfArray) public nonReentrant {
         "Not authorized or bet inactive"
     );
     
+    
     uint96 refundAmount;
     unchecked {
         refundAmount = currentBet.amountBuyerLocked + currentBet.amountDeployerLocked;
@@ -627,8 +632,8 @@ function editADeployedBet(
     uint96 newAskingPrice
 ) public payable nonReentrant {
     require(positionOfArray < arrayOfBets.length, "Invalid position");
-    bet storage currentBet = arrayOfBets[positionOfArray];
     
+    bet storage currentBet = arrayOfBets[positionOfArray];
     require(
         currentBet.owner == msg.sender && 
         currentBet.deployer == msg.sender && 
@@ -638,6 +643,7 @@ function editADeployedBet(
         s_raffleState == RaffleState.OPEN,
         "Not authorized or bet inactive"
     );
+    
     
     uint96 currentLocked = currentBet.amountDeployerLocked;
     
