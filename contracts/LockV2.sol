@@ -8,23 +8,15 @@ contract predMarket2 is ReentrancyGuard {
 
     address public immutable owner;
 
-    address[] private staffWallets = [
-        0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 // Add more addresses as needed
-    ];
+   
 
 
    
    uint96 public staffPay;
+   mapping(address => bool) public staffWalletMap;
 
     modifier onlyStaff() {
-        bool isStaff = false;
-        for (uint256 i = 0; i < staffWallets.length; i++) {
-            if (staffWallets[i] == msg.sender) {
-                isStaff = true;
-                break;
-            }
-        }
-        require(isStaff, "Caller is not a staff member");
+        require(staffWalletMap[msg.sender], "Caller is not a staff member");
         _;
     }
     
@@ -93,22 +85,17 @@ event BetCancelled();
   constructor(uint256 _endTime) {
     require(msg.sender != address(0), "Invalid owner address");
     require(_endTime > block.timestamp, "Invalid end time");
+    staffWalletMap[0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266] = true;
     owner = msg.sender;
     endTime = _endTime;
     s_raffleState = RaffleState.OPEN;
 }
 
     modifier onlyOwnerOrStaff() {
-        bool isStaff = false;
-        for (uint256 i = 0; i < staffWallets.length; i++) {
-            if (staffWallets[i] == msg.sender) {
-                isStaff = true;
-                break;
-            }
-        }
-        require(msg.sender == owner || isStaff, "Caller is not the owner or a staff member");
-        _;
-    }
+    require(msg.sender == owner || staffWalletMap[msg.sender], "Caller is not the owner or a staff member");
+    _;
+}
+
 
 
 
