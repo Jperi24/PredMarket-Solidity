@@ -7,6 +7,21 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract predMarket2 is ReentrancyGuard {
 
     address public immutable owner;
+    bool private locked;
+
+     // Rate limiting
+ 
+
+     modifier noNesting() {
+        require(!locked, "No nested calls");
+        locked = true;
+        _;
+        locked = false;
+    }
+
+  
+
+
 
    
 
@@ -119,10 +134,22 @@ struct bet {
 
     bet[] public arrayOfBets;
 
+ // Safe receive function
+    receive() external payable {
+      
+    }
+
+    // Safe fallback
+    fallback() external payable {
+        revert();
+    }
+
 function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn) 
     public 
     payable 
-    nonReentrant  
+    nonReentrant
+    noNesting 
+     
      
 {
     require(
@@ -140,6 +167,8 @@ function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn)
     require(msg.value <= type(uint96).max, "Amount too large");
     require(amountToBuy <= type(uint96).max, "Buy amount too large");
     
+    
+    
     uint32 positionInArray = uint32(arrayOfBets.length);
     betsByUser[msg.sender].push(positionInArray);
     
@@ -155,6 +184,7 @@ function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn)
         isActive: true
     }));
     emit userCreatedABet(positionInArray);
+     
 
 }
 
@@ -163,7 +193,9 @@ function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn)
         s_raffleState = RaffleState(state); // Cast uint8 to RaffleState enum
     }
 
-    function unlistBets(uint32[] memory positionsOfArray) public nonReentrant{
+    function unlistBets(uint32[] memory positionsOfArray) public nonReentrant noNesting 
+     {
+     
         // Loop through each position provided in the array
         require(positionsOfArray.length<=betsByUser[msg.sender].length + 5);
         for (uint32 i = 0; i < positionsOfArray.length;) {
@@ -183,11 +215,12 @@ function sellANewBet(uint96 amountToBuy, uint8 conditionToWIn)
             
         }
         emit BetUnlisted();
+      
     }
 
  
 
-function buyABet(uint32 positionOfArray) public payable nonReentrant {
+function buyABet(uint32 positionOfArray) public payable nonReentrant noNesting   {
     require(s_raffleState == RaffleState.OPEN);
     bet storage currentBet = arrayOfBets[positionOfArray];
     
@@ -199,6 +232,7 @@ function buyABet(uint32 positionOfArray) public payable nonReentrant {
         currentBet.owner != msg.sender &&
         positionOfArray < arrayOfBets.length
     );
+
 
     address previousOwner = currentBet.owner;
     
@@ -220,13 +254,14 @@ function buyABet(uint32 positionOfArray) public payable nonReentrant {
     currentBet.selling = false;
     
     emit userBoughtBet(positionOfArray, msg.sender, uint96(msg.value));
+  
 }
 
 
     
 
 
-function sellAnExistingBet(uint32 positionOfArray, uint96 newAskingPrice) public nonReentrant {
+function sellAnExistingBet(uint32 positionOfArray, uint96 newAskingPrice) public nonReentrant noNesting  {
     require(s_raffleState == RaffleState.OPEN);
     require(positionOfArray < arrayOfBets.length);
     bet storage currentBet = arrayOfBets[positionOfArray];
@@ -237,11 +272,14 @@ function sellAnExistingBet(uint32 positionOfArray, uint96 newAskingPrice) public
         newAskingPrice > 0 
 
     );
+ 
     
     currentBet.amountToBuyFor = newAskingPrice;
     currentBet.selling = true;
     
     emit userReListedBet();
+
+  
 }
 
   
@@ -353,13 +391,15 @@ function declareWinner(uint8 _winner) public onlyStaff nonReentrant {
 
 
 
-function disagreeWithOwner() public nonReentrant {
+function disagreeWithOwner() public nonReentrant noNesting {
     require(
         (s_raffleState == RaffleState.VOTING && block.timestamp < endOfVoting) || 
         (s_raffleState == RaffleState.OPEN && block.timestamp > endTime)
     );
+   
     s_raffleState = RaffleState.UNDERREVIEW;
     emit userVoted();
+    
 }
 
 function allBets_Balance() public view returns (
@@ -492,7 +532,8 @@ function _getActiveBets() private view returns (bet[] memory) {
 
 
 
-    function withdraw() public nonReentrant {
+    function withdraw() public nonReentrant noNesting 
+         {
     require(
         s_raffleState == RaffleState.SETTLED || 
         (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting)
@@ -500,6 +541,7 @@ function _getActiveBets() private view returns (bet[] memory) {
 
     uint32[] storage userBets = betsByUser[msg.sender];
     require(userBets.length > 0);
+   
 
     uint96 betterBalanceNew;
     uint96 creatorPay;
@@ -559,6 +601,7 @@ function _getActiveBets() private view returns (bet[] memory) {
     require(success, "Transfer failed");
 
     emit userWithdrew(msg.sender, betterBalanceNew);
+  
 }
 
 function _calculateWinnings(bet storage currentBet) private  returns (uint96 balance, uint96 creator) {
@@ -617,7 +660,8 @@ function editADeployedBet(
     uint32 positionOfArray, 
     uint96 newDeployPrice, 
     uint96 newAskingPrice
-) public payable nonReentrant {
+) public payable nonReentrant noNesting 
+         {
     require(positionOfArray < arrayOfBets.length, "Invalid position");
     
     bet storage currentBet = arrayOfBets[positionOfArray];
@@ -657,11 +701,13 @@ function editADeployedBet(
     currentBet.selling = true;
     
     emit BetEdited();
+  
 }
 
 
 
-function transferOwnerAmount() public onlyOwnerOrStaff nonReentrant {
+function transferOwnerAmount() public onlyOwnerOrStaff nonReentrant noNesting 
+          {
     require(
         (s_raffleState == RaffleState.VOTING && block.timestamp > endOfVoting) || 
         s_raffleState == RaffleState.SETTLED
